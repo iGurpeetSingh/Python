@@ -19,7 +19,7 @@ async function parseResponse(response) {
 }
 
 function hasWakeWord(value) {
-  return /गुरी|\\bguri\\b/i.test(value || "");
+  return /गुरी|\bguri\b/i.test(value || "");
 }
 
 export default function App() {
