@@ -230,7 +230,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
 
         val wakeCommand = raw.contains("गुरी", ignoreCase = true) ||
-            Regex("\\\\bguri\\\\b", RegexOption.IGNORE_CASE).containsMatchIn(raw)
+            Regex("\\bguri\\b", RegexOption.IGNORE_CASE).containsMatchIn(raw)
 
         if (!wakeCommand) {
             status.text = "आदेश देने से पहले “गुरी” बोलें।"
@@ -240,7 +240,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         val command = raw
             .replace("गुरी", "", ignoreCase = true)
-            .replace(Regex("\\\\bguri\\\\b", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\bguri\\b", RegexOption.IGNORE_CASE), "")
             .replace(",", " ")
             .replace("，", " ")
             .trim()
@@ -343,7 +343,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun extractCount(command: String): Int {
-        Regex("\\\\d+").find(command)?.value?.toIntOrNull()?.let { return it }
+        Regex("\\d+").find(command)?.value?.toIntOrNull()?.let { return it }
         val hindiNumbers = mapOf(
             "एक" to 1, "दो" to 2, "तीन" to 3, "चार" to 4, "पांच" to 5, "पाँच" to 5,
             "छह" to 6, "छः" to 6, "सात" to 7, "आठ" to 8, "नौ" to 9, "दस" to 10
