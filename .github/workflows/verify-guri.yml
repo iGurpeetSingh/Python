@@ -1,15 +1,21 @@
-name: Verify Guri Voice App
+name: Verify Guri Cloud and Device Agents
 
 on:
   push:
     paths:
       - "backend/**"
       - "frontend/**"
+      - "agents/**"
+      - "Dockerfile"
+      - "render.yaml"
       - ".github/workflows/verify-guri.yml"
   pull_request:
     paths:
       - "backend/**"
       - "frontend/**"
+      - "agents/**"
+      - "Dockerfile"
+      - "render.yaml"
       - ".github/workflows/verify-guri.yml"
 
 permissions:
@@ -25,7 +31,9 @@ jobs:
           python-version: "3.12"
       - name: Install Python dependencies
         run: python -m pip install -r backend/requirements.txt
-      - name: Run command parser tests
+      - name: Compile backend and device agents
+        run: python -m compileall -q backend agents
+      - name: Run command parser and cloud routing tests
         working-directory: backend
         run: python -m unittest discover -s tests -v
 
@@ -41,3 +49,10 @@ jobs:
         run: |
           npm install
           npm run build
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production Guri Cloud image
+        run: docker build --tag guri-cloud:ci .
