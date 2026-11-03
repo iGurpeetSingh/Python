@@ -55,7 +55,7 @@ async def mobile_devices():
             "devices": [
                 line.split()[0]
                 for line in out.splitlines()[1:]
-                if "\\tdevice" in line
+                if "\tdevice" in line
             ]
         }
     except HTTPException:
@@ -79,6 +79,7 @@ async def chat(body: Chat):
     low = msg.casefold()
 
     try:
+        # Explicit browser actions must be routed to tools, never to the language model.
         chatgpt_command = parse_chatgpt_command(msg)
         if chatgpt_command is not None:
             result = await open_chatgpt(chatgpt_command.message)
@@ -87,7 +88,7 @@ async def chat(body: Chat):
             result = {"reply": await instagram_open(), "action": "instagram_open", "status": "completed"}
 
         elif any(x in low for x in ["scroll reels", "reels scroll", "रील स्क्रॉल", "रील्स स्क्रॉल"]):
-            match = re.search(r"(\\d+)", low)
+            match = re.search(r"(\d+)", low)
             count = max(1, min(30, int(match.group(1)))) if match else 3
             result = {"reply": await reels_scroll(count), "action": "reels_scroll", "status": "completed"}
 
@@ -101,7 +102,7 @@ async def chat(body: Chat):
             result = {"reply": await open_site("https://www.youtube.com"), "action": "open", "status": "completed"}
 
         elif "amazon" in low and any(x in low for x in ["search", "find", "watch", "watches", "घड़ी", "खोज", "सर्च"]):
-            match = re.search(r"(?:search|find|खोजो|सर्च करो)\\s*(?:for)?\\s*(.+)", msg, flags=re.I)
+            match = re.search(r"(?:search|find|खोजो|सर्च करो)\s*(?:for)?\s*(.+)", msg, flags=re.I)
             query = match.group(1).strip() if match else "watches"
             rows = await search_web(query, True)
             result = {
@@ -112,12 +113,12 @@ async def chat(body: Chat):
             }
 
         elif any(x in low for x in ["google पर सर्च", "search google for", "गूगल पर खोज"]):
-            match = re.search(r"(?:search google for|google पर सर्च करो|गूगल पर खोजो)\\s*(.+)", msg, flags=re.I)
+            match = re.search(r"(?:search google for|google पर सर्च करो|गूगल पर खोजो)\s*(.+)", msg, flags=re.I)
             query = match.group(1).strip() if match else msg
             rows = await search_web(query)
             result = {
-                "reply": "\\n".join(
-                    x["title"] + "\\n" + x["snippet"] + "\\n" + x["url"] for x in rows
+                "reply": "\n".join(
+                    x["title"] + "\n" + x["snippet"] + "\n" + x["url"] for x in rows
                 ) or "No readable results.",
                 "action": "google_search",
                 "results": rows,
