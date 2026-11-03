@@ -140,6 +140,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if (cloudAgentMode) {
             handler.postDelayed({ connectCloud() }, 900)
             micButton.text = "Cloud voice mode"
+            micButton.isEnabled = false
         }
 
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -158,6 +159,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cloudAgentMode = savedUrl.isNotBlank() && savedCode.isNotBlank()
         if (cloudAgentMode) {
             micButton.text = "Cloud voice mode"
+            micButton.isEnabled = false
             handler.postDelayed({ connectCloud() }, 500)
         } else if (listeningEnabled && hasAudioPermission()) {
             handler.postDelayed({ startListening() }, 650)
@@ -416,6 +418,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         cloudAgentMode = true
         stopListening()
         micButton.text = "Cloud voice mode"
+        micButton.isEnabled = false
 
         val service = AgentAccessibilityService.instance
         if (service == null) {
