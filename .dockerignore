@@ -1,0 +1,12 @@
+.git
+.github
+.venv
+**/.venv
+**/__pycache__
+**/*.pyc
+**/*.db
+**/node_modules
+frontend/dist
+backend/browser_profile
+agents/.env
+agents/browser_profile
