@@ -10,7 +10,7 @@ from .core import (
     init_db, save, history, local_answer, open_site, search_web,
     instagram_open, reels_scroll, adb,
 )
-from .browser import open_chatgpt
+from .browser import open_chatgpt, shutdown_browser
 from .intents import parse_chatgpt_command
 
 
@@ -25,7 +25,10 @@ class Scroll(BaseModel):
 @asynccontextmanager
 async def lifespan(app):
     init_db()
-    yield
+    try:
+        yield
+    finally:
+        await shutdown_browser()
 
 
 app = FastAPI(title="Orbit Personal Agent", lifespan=lifespan)
