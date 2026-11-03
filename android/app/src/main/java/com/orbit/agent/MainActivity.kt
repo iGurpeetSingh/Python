@@ -102,14 +102,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setPadding(0, 22, 0, 6)
         }
         cloudUrlInput = EditText(this).apply {
-            hint = "Guri Cloud URL (https://...)"
+            this.hint = "Guri Cloud URL (https://...)"
             textSize = 13f
             setSingleLine(true)
             setTextColor(android.graphics.Color.WHITE)
             setHintTextColor(android.graphics.Color.GRAY)
         }
         cloudCodeInput = EditText(this).apply {
-            hint = "Render GURI_PAIRING_CODE"
+            this.hint = "Render GURI_PAIRING_CODE"
             textSize = 13f
             setSingleLine(true)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
