@@ -21,6 +21,7 @@ class AgentAccessibilityService : AccessibilityService() {
     private var cloudClient: GuriCloudSocket? = null
     private var connectedCloudUrl = ""
     private var connectedPairingCode = ""
+    private var cloudConnected = false
     private var statusListener: ((String) -> Unit)? = null
 
     override fun onServiceConnected() {
@@ -61,7 +62,10 @@ class AgentAccessibilityService : AccessibilityService() {
             return
         }
         if (url == connectedCloudUrl && code == connectedPairingCode && cloudClient != null) {
-            statusListener?.invoke("Guri Cloud connection पहले से शुरू है।")
+            statusListener?.invoke(
+                if (cloudConnected) "Guri Cloud से Android connected"
+                else "Guri Cloud reconnect कर रही है…"
+            )
             return
         }
 
@@ -74,7 +78,10 @@ class AgentAccessibilityService : AccessibilityService() {
             url,
             code,
             { message ->
-                handler.post { statusListener?.invoke(message) }
+                handler.post {
+                    cloudConnected = message.contains("connected", ignoreCase = true)
+                    statusListener?.invoke(message)
+                }
             },
             { requestId, command ->
                 handler.post { handleCloudCommand(requestId, command) }
