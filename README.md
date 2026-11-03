@@ -79,9 +79,9 @@ Phone examples from the live webpage:
 - "Instagram खोलो और Reels scroll करो"
 - "Reels पाँच बार scroll करो"
 
-The command is sent over HTTPS/WebSocket to the Android companion. The phone then opens Instagram, locates/taps the Reels tab (with a best-effort fallback), performs swipes, and sends its result back to the webpage.
+The webpage sends the command over HTTPS/WebSocket to the Android Accessibility Service. The phone then opens Instagram, locates/taps the Reels tab (with a best-effort fallback), performs swipes, and sends its result back to the webpage.
 
-Android still has OS-level restrictions: this app is not an invisible, always-on, screen-off wake-word service. Keep Guri active and exempt it from battery optimization if your Android manufacturer aggressively stops background apps. If the app is force-stopped or the phone is offline, the cloud will show Android as offline and commands will not be reported as successful.
+Android still has OS-level restrictions: this app is not an invisible, always-on, screen-off wake-word service. Keep the Guri Accessibility Service enabled and exempt Guri from battery optimization if your Android manufacturer aggressively stops background apps. If the app is force-stopped, Accessibility is disabled, or the phone is offline, the cloud will show Android as offline and commands will not be reported as successful.
 
 ## 5. Command routing
 
