@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Mic, MicOff, Bot, LoaderCircle } from "lucide-react";
+import { Mic, MicOff, Bot, LoaderCircle, Link2, Smartphone, Laptop } from "lucide-react";
 import "./style.css";
 
-const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
-const isMobileBrowser = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
-const isSecureHostedPage =
-  window.location.protocol === "https:" &&
-  !["localhost", "127.0.0.1"].includes(window.location.hostname);
+const API = import.meta.env.VITE_API_URL || (
+  ["localhost", "127.0.0.1"].includes(window.location.hostname)
+    ? "http://127.0.0.1:8000"
+    : window.location.origin
+);
 
 async function parseResponse(response) {
   const raw = await response.text();
@@ -23,66 +23,23 @@ async function parseResponse(response) {
 }
 
 function cleanCommand(phrase) {
-  return (phrase || "")
-    .replace(/^\s*(?:गुरी|guri)\s*[,،:;-]?\s*/i, "")
-    .trim();
-}
-
-function explainConnectionError(error) {
-  const message = error?.message || String(error);
-  if (/failed to fetch|networkerror|load failed|fetch failed/i.test(message)) {
-    if (isMobileBrowser) {
-      return "यह Guri webpage है, Android app नहीं। फोन का browser Python backend तक नहीं पहुँच रहा। Instagram खोलने और scroll करने के लिए फोन में installed Guri Android app खोलें।";
-    }
-    if (isSecureHostedPage) {
-      return "आप Guri को online HTTPS webpage से चला रहे हैं। यह webpage आपके PC के local Python service से सुरक्षित रूप से connect नहीं कर पा रहा। Windows पर repository के अंदर Start-Guri.bat चलाएँ और उसी PC पर http://127.0.0.1:5173 खोलें।";
-    }
-    return "इस कंप्यूटर पर Guri Python service उपलब्ध नहीं है। Start-Guri.bat इसी कंप्यूटर पर चलाएँ। फिर http://127.0.0.1:8000/api/health खोलें; वहाँ { ok: true, agent: Guri } दिखना चाहिए।";
-  }
-  return message;
+  return (phrase || "").replace(/^\s*(?:गुरी|guri)\s*[,،:;-]?\s*/i, "").trim();
 }
 
 export default function App() {
   const [active, setActive] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState("Guri service जाँच रही है…");
+  const [status, setStatus] = useState("Guri Cloud जाँच रही है…");
   const [heard, setHeard] = useState("");
   const [reply, setReply] = useState("माइक दबाएँ और सीधे आदेश बोलें।");
-  const [backendReady, setBackendReady] = useState(false);
+  const [cloudMode, setCloudMode] = useState(false);
+  const [pairingCode, setPairingCode] = useState(() => sessionStorage.getItem("guri_pairing_code") || "");
+  const [pairingVerified, setPairingVerified] = useState(false);
+  const [devices, setDevices] = useState({ windows: "offline", android: "offline" });
   const recognitionRef = useRef(null);
   const activeRef = useRef(false);
   const busyRef = useRef(false);
   const restartTimer = useRef(null);
-
-  const checkBackend = useCallback(async () => {
-    if (isMobileBrowser) {
-      setBackendReady(false);
-      setStatus("मोबाइल पर Instagram के लिए Android Guri app खोलें");
-      return false;
-    }
-    try {
-      const response = await fetch(API + "/api/health", { cache: "no-store" });
-      const data = await parseResponse(response);
-      if (!data.ok || data.agent !== "Guri") {
-        throw new Error("इस address पर Guri backend नहीं चल रहा।");
-      }
-      setBackendReady(true);
-      setStatus("Guri connected — आवाज़ दें");
-      return true;
-    } catch (error) {
-      setBackendReady(false);
-      setStatus(explainConnectionError(error));
-      return false;
-    }
-  }, []);
-
-  useEffect(() => {
-    void checkBackend();
-    const interval = window.setInterval(() => {
-      if (!activeRef.current && !busyRef.current) void checkBackend();
-    }, 10000);
-    return () => window.clearInterval(interval);
-  }, [checkBackend]);
 
   useEffect(() => {
     activeRef.current = active;
@@ -91,6 +48,57 @@ export default function App() {
   useEffect(() => {
     busyRef.current = busy;
   }, [busy]);
+
+  const refreshDevices = useCallback(async (code = pairingCode) => {
+    if (!code) return;
+    try {
+      const response = await fetch(API + "/api/devices", {
+        headers: { "X-Guri-Pairing-Code": code },
+        cache: "no-store",
+      });
+      const data = await parseResponse(response);
+      setDevices(data.devices || { windows: "offline", android: "offline" });
+      setPairingVerified(true);
+    } catch (error) {
+      setPairingVerified(false);
+      setDevices({ windows: "offline", android: "offline" });
+      throw error;
+    }
+  }, [pairingCode]);
+
+  const checkBackend = useCallback(async () => {
+    try {
+      const response = await fetch(API + "/api/health", { cache: "no-store" });
+      const data = await parseResponse(response);
+      if (!data.ok || data.agent !== "Guri") throw new Error("Guri Cloud health check failed.");
+      setCloudMode(Boolean(data.cloud_mode));
+      if (data.cloud_mode) {
+        setStatus("Guri Cloud connected");
+        if (pairingCode) {
+          try {
+            await refreshDevices(pairingCode);
+          } catch {
+            setStatus("Pairing code जाँचें");
+          }
+        }
+      } else {
+        setPairingVerified(true);
+        setStatus("Guri service connected");
+      }
+      return data;
+    } catch (error) {
+      setStatus("Guri Cloud connection failed: " + (error?.message || error));
+      return null;
+    }
+  }, [pairingCode, refreshDevices]);
+
+  useEffect(() => {
+    void checkBackend();
+    const interval = window.setInterval(() => {
+      if (!activeRef.current && !busyRef.current) void checkBackend();
+    }, 15000);
+    return () => window.clearInterval(interval);
+  }, [checkBackend]);
 
   const speakReply = useCallback((text) => new Promise((resolve) => {
     if (!("speechSynthesis" in window) || !text) {
@@ -106,56 +114,77 @@ export default function App() {
     window.setTimeout(resolve, 12000);
   }), []);
 
+  async function connectPairingCode() {
+    const code = pairingCode.trim();
+    if (!code) {
+      setStatus("Render pairing code डालें");
+      return;
+    }
+    setBusy(true);
+    try {
+      const response = await fetch(API + "/api/pairing/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      const data = await parseResponse(response);
+      sessionStorage.setItem("guri_pairing_code", code);
+      await refreshDevices(code);
+      setPairingVerified(true);
+      setReply("Guri Cloud pair हो गया। अब Windows और Android companion connect करें।");
+      setStatus(data.message || "Guri paired");
+    } catch (error) {
+      sessionStorage.removeItem("guri_pairing_code");
+      setPairingVerified(false);
+      setStatus("Pairing failed: " + (error?.message || error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const runCommand = useCallback(async (spokenText) => {
     if (busyRef.current) return;
     const command = cleanCommand(spokenText) || (spokenText || "").trim();
     if (!command) return;
 
-    const isPhoneAutomation =
-      /(instagram|इंस्टाग्राम|reels|रील|open app|ऐप खोल)/i.test(command);
-    if (isMobileBrowser && isPhoneAutomation) {
-      const message = "Instagram control के लिए Guri Android app खोलें। यह webpage दूसरी apps को tap या scroll नहीं कर सकता।";
+    if (cloudMode && (!pairingCode || !pairingVerified)) {
+      const message = "पहले Render का GURI_PAIRING_CODE डालकर Connect दबाएँ।";
       setReply(message);
-      setStatus("Native Android Guri app इस्तेमाल करें");
+      setStatus("Cloud pairing जरूरी है");
       await speakReply(message);
       return;
     }
 
     busyRef.current = true;
     setBusy(true);
-    setStatus("आदेश मिला — काम शुरू कर रही हूँ…");
+    setStatus("Command Guri Cloud को भेज रही हूँ…");
 
     try {
-      const healthResponse = await fetch(API + "/api/health", { cache: "no-store" });
-      const health = await parseResponse(healthResponse);
-      if (!health.ok || health.agent !== "Guri") {
-        throw new Error("Guri local backend गलत या unavailable है।");
-      }
-      setBackendReady(true);
-
       const response = await fetch(API + "/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(cloudMode ? { "X-Guri-Pairing-Code": pairingCode } : {}),
+        },
         body: JSON.stringify({ message: command }),
       });
       const data = await parseResponse(response);
       const answer = data.reply || "काम पूरा हुआ।";
       setReply(answer);
-      if (data.status === "needs_login") {
-        setStatus("ChatGPT में एक बार login करें");
-        activeRef.current = false;
-        setActive(false);
-      } else if (data.status === "partial") {
-        setStatus("काम आंशिक रूप से हुआ");
-      } else {
-        setStatus("काम पूरा हुआ");
-      }
+      setStatus(
+        data.status === "partial"
+          ? "काम आंशिक रूप से हुआ"
+          : (data.device ? data.device + " device पर command पूरी" : "काम पूरा हुआ")
+      );
       await speakReply(answer);
+      if (cloudMode) {
+        try { await refreshDevices(); } catch {}
+      }
     } catch (error) {
-      setBackendReady(false);
-      const answer = "काम नहीं हो पाया: " + explainConnectionError(error);
+      const message = error?.message || String(error);
+      const answer = "काम नहीं हो पाया: " + message;
       setReply(answer);
-      setStatus("Backend connection नहीं है");
+      setStatus("Command execute नहीं हुई");
       await speakReply(answer);
     } finally {
       busyRef.current = false;
@@ -164,13 +193,13 @@ export default function App() {
         restartTimer.current = window.setTimeout(startRecognition, 700);
       }
     }
-  }, [speakReply]);
+  }, [cloudMode, pairingCode, pairingVerified, refreshDevices, speakReply]);
 
   const startRecognition = useCallback(() => {
     if (!activeRef.current || busyRef.current || document.visibilityState !== "visible") return;
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      setStatus("इस browser में voice recognition नहीं है। Chrome इस्तेमाल करें।");
+      setStatus("इस browser में voice recognition उपलब्ध नहीं है। Chrome इस्तेमाल करें।");
       setActive(false);
       activeRef.current = false;
       return;
@@ -210,9 +239,7 @@ export default function App() {
       recognition.start();
     } catch (error) {
       setStatus("Microphone शुरू नहीं हुआ: " + (error?.message || error));
-      if (activeRef.current) {
-        restartTimer.current = window.setTimeout(startRecognition, 1000);
-      }
+      if (activeRef.current) restartTimer.current = window.setTimeout(startRecognition, 1000);
     }
   }, [runCommand]);
 
@@ -255,25 +282,41 @@ export default function App() {
       </div>
       <h1>Guri</h1>
       <p className="guri-status">{status}</p>
-      <p className="guri-hint">
-        {backendReady ? "माइक दबाएँ और सीधे आदेश बोलें" : "पहले Guri local service से connection चाहिए"}
-      </p>
-      <button
-        className={"guri-mic" + (active ? " active" : "")}
-        onClick={toggleListening}
-        disabled={busy || (!isMobileBrowser && !backendReady)}
-        title={!isMobileBrowser && !backendReady ? "पहले local Guri backend start करें" : "Voice command"}
-      >
+      <p className="guri-hint">माइक दबाएँ और सीधे आदेश बोलें</p>
+      <button className={"guri-mic" + (active ? " active" : "")} onClick={toggleListening} disabled={busy}>
         {active ? <MicOff size={23} /> : <Mic size={23} />}
-        {active ? "सुनना बंद करें" : backendReady || isMobileBrowser ? "Guri को सुनाएँ" : "Backend कनेक्ट नहीं है"}
+        {active ? "सुनना बंद करें" : "Guri को सुनाएँ"}
       </button>
+
+      {cloudMode && (
+        <section className="guri-message pairing">
+          <small><Link2 size={13} /> SECURE DEVICE PAIRING</small>
+          <p>Render Dashboard से GURI_PAIRING_CODE डालें। यही code Windows और Android companions में भी डालना है।</p>
+          <div className="guri-pair-row">
+            <input
+              type="password"
+              value={pairingCode}
+              onChange={(event) => {
+                setPairingCode(event.target.value);
+                setPairingVerified(false);
+              }}
+              placeholder="GURI_PAIRING_CODE"
+              autoComplete="off"
+            />
+            <button onClick={connectPairingCode} disabled={busy || !pairingCode.trim()}>Connect</button>
+          </div>
+          {pairingVerified && (
+            <div className="guri-devices">
+              <span><Laptop size={14}/> Windows: {devices.windows}</span>
+              <span><Smartphone size={14}/> Android: {devices.android}</span>
+            </div>
+          )}
+        </section>
+      )}
+
       {heard && <section className="guri-message"><small>आपने कहा</small><p>{heard}</p></section>}
       <section className="guri-message response"><small>Guri</small><p>{reply}</p></section>
-      <p className="guri-footnote">
-        {isMobileBrowser
-          ? "फोन पर Instagram control के लिए installed Guri Android app खोलें।"
-          : "Guri desktop commands के लिए Python backend इसी PC पर चालू होना जरूरी है।"}
-      </p>
+      <p className="guri-footnote">Guri Cloud commands paired devices को इंटरनेट से भेजती है। Device पर companion agent चालू होना जरूरी है।</p>
     </main>
   );
 }
