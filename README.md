@@ -1,104 +1,130 @@
-# Guri Voice Assistant
+# Guri Voice Assistant — Cloud + Device Agents
 
-Voice-first assistant with a React desktop voice screen, Python local automation service, and native Android companion.
+Guri is a live cloud command service with a minimal voice webpage and paired device agents.
 
-## Important: use the correct Guri app for the device
+- The **cloud website and command API** are hosted on Render.
+- The **Windows agent** stays connected to Guri Cloud and carries out browser actions on that PC.
+- The **Android Guri app** stays connected to Guri Cloud and carries out Instagram/Reels actions on that phone.
+- The website does not pretend that a server-side browser can click on your personal computer or phone. The paired agent performs the action on the actual target device and reports the result to the cloud.
 
-- **Windows desktop commands** (open a browser tab, search ChatGPT, send a message): use the Guri webpage started on that same Windows PC. It needs the local Python backend.
-- **Android phone commands** (open Instagram, find Reels, swipe/scroll): use the installed native **Guri Voice Assistant APK**. Do not use the React webpage in mobile Chrome for controlling other apps. Android does not let an ordinary webpage tap or scroll other installed apps.
+## 1. Deploy the live website and API
 
-## Windows desktop — first-time setup
+This repository includes \`Dockerfile\` and \`render.yaml\` for a single Render web service. The Docker image builds the React webpage and serves it from the FastAPI cloud API.
 
-Install these two runtimes once:
-- Python 3.11 or newer
-- Node.js LTS
+1. Open the repository's Render Blueprint deployment page:
+   \`https://render.com/deploy?repo=https://github.com/iGurpeetSingh/Python\`
+2. Sign in to Render and authorize access to this GitHub repository.
+3. Review the service named **guri-cloud** and deploy the Blueprint.
+4. Render generates a secret called \`GURI_PAIRING_CODE\`. After the service is created, open Render Dashboard → **guri-cloud** → **Environment** and copy this secret. Do not publish or send this value to anyone.
+5. Wait for the service deploy to finish. Your live URL will look like \`https://guri-cloud.onrender.com\` (Render may add a suffix if that name is already taken).
 
-Then download the repository ZIP, extract the entire folder to a normal folder (not the ZIP preview), and double-click **Start-Guri.bat**.
+The Blueprint uses a **Starter** web service so the cloud relay does not intentionally sleep when idle. This is a paid Render compute plan. A free Render web service can sleep after 15 minutes without inbound HTTP or WebSocket messages, and waking it can take about a minute; that is not suitable when you expect the control service to be instantly available.
 
-The launcher:
-1. Creates the backend Python virtual environment.
-2. Installs backend packages and Playwright Chromium.
-3. Installs React packages if needed.
-4. Starts the Python API on port 8000.
-5. Starts the voice webpage on port 5173.
-6. Verifies both services before opening Guri.
+Health check:
+\`https://YOUR-RENDER-URL/api/health\`
 
-No terminal commands need to be typed. The first setup needs an internet connection to download packages and Chromium. Later starts reuse the installed packages.
+Expected JSON includes:
+~~~json
+{
+  "ok": true,
+  "agent": "Guri",
+  "cloud_mode": true,
+  "pairing_required": true,
+  "connected_devices": []
+}
+~~~
 
-Expected local addresses:
-- Guri voice page: http://127.0.0.1:5173
-- Guri backend health: http://127.0.0.1:8000/api/health
+## 2. Open the live Guri webpage
 
-The health address must return JSON with \`"ok": true\` and \`"agent": "Guri"\`.
+Open the Render URL in Chrome. Press the microphone button once and grant microphone access.
 
-## Make Windows start Guri automatically at sign-in
+Under **Secure Device Pairing**, paste the Render \`GURI_PAIRING_CODE\` and press **Connect**. The website should show Windows and Android device status. The code is stored only in the current browser tab's session storage.
 
-After **Start-Guri.bat** has completed the first setup successfully, double-click **Install-Guri-Autostart.bat** once. It creates a shortcut in the current Windows user's Startup folder. On future Windows sign-ins, Guri starts its backend and opens the voice page automatically.
+## 3. Connect your Windows PC
 
-To undo this, double-click **Remove-Guri-Autostart.bat**. This only removes the Guri startup shortcut; it does not uninstall Python, Node.js or the repository.
+On the PC that should open browser tabs and send ChatGPT messages:
 
-If auto-start runs but something is missing, see:
-- \`%TEMP%\guri-startup.log\`
-- \`%TEMP%\guri-backend-error.log\`
-- \`%TEMP%\guri-frontend-error.log\`
+1. Download and extract the latest repository ZIP.
+2. Install Python 3.11+ once.
+3. Double-click \`Start-Guri-Desktop-Agent.bat\`.
+4. Enter the Render URL, then the same \`GURI_PAIRING_CODE\`.
+5. Keep the agent window running. It reconnects automatically if the network or service drops.
 
-The launcher checks whether ports 8000 and 5173 are already occupied. It will report if another program owns one of those ports instead of silently treating it as Guri.
+The first run installs the Python requirements and Playwright Chromium into \`agents/.venv\`. The Windows agent opens a separate visible browser profile on your PC. Sign into ChatGPT manually in that profile once.
 
-## Desktop voice commands
-
-Open the page using **Start-Guri.bat**, press the microphone once, grant microphone permission, then speak. Saying "Guri" is optional during the explicit microphone session.
-
-Examples:
-- "Amazon खोलो"
+Desktop examples:
 - "New Tab खोलो, ChatGPT search करो और उसको message Hi"
-- "ChatGPT खोलकर message करो कि Hello"
+- "ChatGPT खोलो और message करो कि Hello"
+- "Amazon खोलो"
+- "Google खोलो"
 
-For ChatGPT automation, Guri opens a separate visible browser profile in a new tab. Sign in manually to ChatGPT in that Guri-controlled browser the first time. Guri stores that browser profile locally; it does not store your password or session token in source code.
+The command runs on the paired Windows PC, not inside Render's server.
 
-The browser voice screen speaks the task result and re-arms listening while the page remains visible.
+## 4. Connect your Android phone
 
-## Android phone — Python backend not required
-
-Install the native Android APK built by the GitHub Actions workflow named **Build Guri Android APK**. Open the artifact named **Guri-Android-debug**, extract the ZIP, and install \`app-debug.apk\` on your phone.
+Install the latest **Guri Voice Assistant APK** from the GitHub Actions artifact **Guri-Android-debug**. In the app:
 
 1. Allow Microphone permission.
-2. Tap **फोन Control चालू करें** once and enable **Guri Voice Assistant** in Android Accessibility settings.
-3. Return to Guri. It listens while its app is open.
+2. Enable **Guri Voice Assistant** under Android Settings → Accessibility.
+3. Enter your Render URL in **Guri Cloud URL**.
+4. Enter the same Render \`GURI_PAIRING_CODE\`.
+5. Tap **Guri Cloud से Connect करें** and keep Guri active.
 
-Example commands:
-- "Guri, Instagram open karo."
-- "Guri, Instagram open karo aur Reels scroll karo."
-- "Guri, Reels scroll karo."
-- "Guri, five baar scroll karo."
+The app reconnects to the cloud WebSocket if the connection drops. Its Accessibility Service is used only for the user-requested tap and swipe actions.
 
-For the combined Instagram command, Guri launches Instagram, tries to find/tap the visible Reels tab through Android Accessibility (with a screen-position fallback), then dispatches swipe gestures. Instagram must be installed and signed in.
+Phone examples from the live webpage:
+- "Instagram खोलो"
+- "Instagram खोलो और Reels scroll करो"
+- "Reels पाँच बार scroll करो"
 
-**Android listening limitation:** This version listens while the Guri app is open. When it launches Instagram, it pauses listening but continues the one-shot Reels/scroll action. Return to Guri before speaking another command. It is not an always-on, screen-off wake-word assistant.
+The command is sent over HTTPS/WebSocket to the Android companion. The phone then opens Instagram, locates/taps the Reels tab (with a best-effort fallback), performs swipes, and sends its result back to the webpage.
 
-## Why "Python backend is not running" appears
+Android still has OS-level restrictions: this app is not an invisible, always-on, screen-off wake-word service. Keep Guri active and exempt it from battery optimization if your Android manufacturer aggressively stops background apps. If the app is force-stopped or the phone is offline, the cloud will show Android as offline and commands will not be reported as successful.
 
-The React webpage calls \`http://127.0.0.1:8000\`. That address means "this same device", not "the other device on my Wi-Fi".
+## 5. Command routing
 
-- If the webpage is open on Windows, the Python API must be running on that same Windows PC. Start it with **Start-Guri.bat**.
-- If the webpage is open in Android Chrome, \`127.0.0.1\` points to the phone. It cannot find the Windows PC's Python server. Use the native Android Guri app for Instagram controls.
-- If the webpage is hosted on a remote HTTPS website, it cannot use the local PC backend through that default HTTP address. Use the locally started page at \`http://127.0.0.1:5173\`.
+| Spoken request | Device that executes it |
+|---|---|
+| Open ChatGPT in a new tab and send Hi | Paired Windows PC |
+| Open Amazon / Google / YouTube | Paired Windows PC |
+| Open Instagram | Paired Android phone |
+| Open Instagram and scroll Reels | Paired Android phone |
 
-## Local AI
+The cloud API returns an error instead of claiming success when the required device is offline or does not reply before the timeout.
 
-Install Ollama and run \`ollama pull qwen2.5:3b\` if you want local conversational answers. The explicitly implemented browser and Android actions do not depend on Ollama.
+## 6. Security and reliability
 
-## Safety and limitations
+- Use the generated \`GURI_PAIRING_CODE\` as a secret. Anyone with it can issue commands to your paired devices.
+- Do not commit the pairing code, browser profile, passwords, or session cookies to GitHub.
+- WebSocket connections use WSS in production, and devices authenticate with an Authorization Bearer header.
+- The current broker keeps connected-device state in the service process. Use one Render instance; horizontal scaling needs a shared broker such as Redis or a managed pub/sub service.
+- Render deploys/restarts can temporarily disconnect agents; both clients reconnect automatically.
+- The cloud service cannot control a device unless its own paired companion is running and connected.
+- Never use automation to bypass logins, CAPTCHA, or a site's access protections.
 
-- Guri only runs supported commands and reports when an action is unavailable.
-- Instagram UI changes can affect Reels tab detection; the agent does not bypass login, CAPTCHA, or app protections.
-- Instagram likes, follows, comments, DMs and purchases are not automated.
-- Never expose the local Python backend to the public internet without authentication and a security review.
-- CI verifies the Python command parser, React production build and Android APK compilation. A real-device Instagram UI test still has to be performed on the user's phone.
+## 7. Local development (optional)
 
-## Backend command tests
-
-From the backend folder:
-
+Backend:
 ~~~powershell
+cd backend
+py -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+playwright install chromium
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+~~~
+
+Frontend:
+~~~powershell
+cd frontend
+npm install
+npm run dev
+~~~
+
+The live Render service does not use this local backend; it is only for local development.
+
+Tests:
+~~~powershell
+cd backend
 python -m unittest discover -s tests -v
 ~~~
