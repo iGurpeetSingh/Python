@@ -41,7 +41,7 @@ export default function App() {
   const [reply, setReply] = useState("पहले Guri Cloud को connect करें, फिर माइक से आदेश दें।");
   const [cloudMode, setCloudMode] = useState(!IS_LOCAL_PAGE);
   const [cloudUrl, setCloudUrl] = useState(() =>
-    sessionStorage.getItem("guri_cloud_url") || DEFAULT_API_BASE
+    localStorage.getItem("guri_cloud_url") || DEFAULT_API_BASE
   );
   const [pairingCode, setPairingCode] = useState(() =>
     sessionStorage.getItem("guri_pairing_code") || ""
@@ -157,7 +157,7 @@ export default function App() {
         throw new Error("इस URL पर Guri API नहीं मिली। Render service URL कॉपी करें।");
       }
 
-      sessionStorage.setItem("guri_cloud_url", base);
+      localStorage.setItem("guri_cloud_url", base);
       setCloudMode(Boolean(health.cloud_mode));
 
       if (health.cloud_mode) {
