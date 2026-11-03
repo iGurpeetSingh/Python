@@ -56,3 +56,13 @@ The companion uses Android SpeechRecognizer + TextToSpeech and an AccessibilityS
 - Android restricts background microphone access; use the app's visible Speak button.
 - Never expose the local backend to the public internet without authentication and a security review.
 - This repository has not been built or tested on your specific PC/phone yet. Verify in Android Studio and on a connected device before relying on it.
+
+## Command parser tests
+
+From the backend directory, run:
+
+~~~powershell
+python -m unittest discover -s tests -v
+~~~
+
+These tests cover the Hindi/English ChatGPT open-and-message phrases and ensure unrelated Instagram requests are not routed to ChatGPT.
