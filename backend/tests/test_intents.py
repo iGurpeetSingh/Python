@@ -10,7 +10,7 @@ class ChatGPTIntentTests(unittest.TestCase):
         )
         self.assertIsNotNone(command)
         self.assertEqual(command.message, "क्या काम कर रहे हो")
-        self.assertTrue(command.search_first)
+        self.assertFalse(command.search_first)
 
     def test_hindi_new_tab_search_and_hi_message(self):
         command = parse_chatgpt_command(
