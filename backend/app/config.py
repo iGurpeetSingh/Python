@@ -12,3 +12,6 @@ ADB_PATH = os.getenv("ADB_PATH", "adb")
 BROWSER_PROFILE_DIR = Path(
     os.getenv("BROWSER_PROFILE_DIR", str(ROOT / "browser_profile"))
 )
+
+GURI_PAIRING_CODE = os.getenv("GURI_PAIRING_CODE", "")
+GURI_CLOUD_MODE = os.getenv("GURI_CLOUD_MODE", "0").strip().lower() in {"1", "true", "yes"}
