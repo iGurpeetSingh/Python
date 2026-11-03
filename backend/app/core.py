@@ -1,4 +1,4 @@
-import asyncio, re, shutil, sqlite3
+import asyncio, re, shutil, sqlite3, webbrowser
 from datetime import datetime, timezone
 from urllib.parse import quote_plus
 import httpx
@@ -27,15 +27,10 @@ async def local_answer(prompt):
         return None
 
 async def open_site(url):
-    async with async_playwright() as p:
-        browser=await p.chromium.launch(headless=False)
-        page=await browser.new_page()
-        await page.goto(url,wait_until="domcontentloaded",timeout=30000)
-        title=await page.title()
-        # Browser context remains alive while this Playwright session is active.
-        # Use a persistent browser profile for long-lived sessions in a later release.
-        await page.wait_for_timeout(1500)
-        return f"Opened {url} — {title or 'page loaded'}. Browser action completed."
+    opened=webbrowser.open_new_tab(url)
+    if not opened:
+        raise HTTPException(500,"Could not open the default browser on this computer.")
+    return f"Sent open request for {url} to the computer's default browser."
 
 async def search_web(query, amazon=False):
     url=("https://www.amazon.in/s?k=" if amazon else "https://www.google.com/search?q=")+quote_plus(query)
