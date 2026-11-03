@@ -44,7 +44,7 @@ You can keep an existing Vercel deployment such as `https://python-puce-nine.ver
 
 Do not enter the Vercel website URL in the Cloud URL field. Vercel serves the static voice page; the Render web service serves `/api/health`, `/api/chat`, pairing APIs and device WebSockets. The Render API accepts browser calls from the Vercel frontend and still protects device-control endpoints with the pairing code.
 
-The Cloud URL and pairing code are stored in the current browser tab's session storage after successful connection. You do not need to rebuild the Vercel frontend merely to enter a different Render URL.
+The Cloud URL is saved in that browser's local storage after successful connection; the pairing code stays in session storage. You do not need to rebuild the Vercel frontend merely to enter a different Render URL.
 
 ## 2. Open the live Guri webpage
 
