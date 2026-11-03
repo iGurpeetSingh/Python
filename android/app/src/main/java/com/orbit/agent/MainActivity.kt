@@ -94,7 +94,18 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     startActivity(launch)
                     reply("Instagram खोल रहा हूँ। Reels खोलने की कोशिश करूँगा।")
-                    status.postDelayed({ AgentAccessibilityService.instance?.openReelsTab() }, 1400)
+                    status.postDelayed({
+                        val accessibility = AgentAccessibilityService.instance
+                        val reelsOpened = accessibility?.openReelsTab() == true
+                        val askedToScroll = command.contains("scroll") || command.contains("स्क्रॉल") || command.contains("अगली")
+                        if (askedToScroll && reelsOpened) {
+                            status.postDelayed({
+                                val count = Regex("\\\\d+").find(command)?.value?.toIntOrNull()?.coerceIn(1, 20) ?: 3
+                                if (AgentAccessibilityService.instance?.swipeReels(count) == true) reply("Reels पर $count बार स्क्रॉल कर दिया।")
+                                else reply("Reels स्क्रीन पर स्क्रॉल नहीं कर पाया।")
+                            }, 900)
+                        }
+                    }, 1800)
                 }
             }
             command.contains("reel") || command.contains("रील") -> {
