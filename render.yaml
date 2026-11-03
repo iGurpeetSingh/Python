@@ -2,12 +2,12 @@ services:
   - type: web
     name: guri-cloud
     runtime: docker
-    plan: starter
+    plan: free
     region: singapore
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /api/health
-    autoDeploy: true
+    autoDeployTrigger: off
     envVars:
       - key: GURI_CLOUD_MODE
         value: "true"
