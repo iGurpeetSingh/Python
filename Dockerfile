@@ -15,4 +15,4 @@ RUN pip install --no-cache-dir -r /app/backend/requirements.txt
 COPY backend/ /app/backend/
 COPY --from=frontend-build /src/frontend/dist/ /app/frontend/dist/
 EXPOSE 10000
-CMD ["sh", "-c", "cd /app/backend && exec uvicorn app.main:app --host 0.0.0.0 --port \${PORT:-10000}"]
+CMD ["sh", "-c", "cd /app/backend && exec uvicorn app.main:app --host 0.0.0.0 --port $PORT"]
