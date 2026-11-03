@@ -51,22 +51,31 @@ async def _get_context():
                     status_code=503,
                     detail=(
                         "Visible browser launch failed. Install Playwright Chromium "
-                        "with playwright install chromium, close any Orbit browser "
-                        "window using this profile, and retry. "
+                        "with playwright install chromium, then retry. "
                         f"Technical detail: {type(exc).__name__}: {exc}"
                     ),
                 ) from exc
         return _context
 
 
+async def _first_visible(page, selector):
+    matches = page.locator(selector)
+    for index in range(await matches.count()):
+        candidate = matches.nth(index)
+        if await candidate.is_visible():
+            return candidate
+    return None
+
+
 async def open_chatgpt(message: str | None = None) -> dict:
     """Open ChatGPT in a visible, persistent browser profile and optionally send a message."""
     context = await _get_context()
     page = await context.new_page()
+
     try:
         await page.goto("https://chatgpt.com/", wait_until="domcontentloaded", timeout=45000)
     except PlaywrightTimeoutError:
-        # A slow page can still finish loading; continue to check for the composer.
+        # A slow page can still finish loading; check for the actual composer below.
         pass
     except Exception as exc:
         raise HTTPException(
@@ -81,9 +90,16 @@ async def open_chatgpt(message: str | None = None) -> dict:
             "status": "opened",
         }
 
-    composer_selector = "[data-testid='prompt-textarea'], #prompt-textarea"
+    composer_selector = (
+        "[data-testid='prompt-textarea'], #prompt-textarea, "
+        "div[contenteditable='true'][role='textbox'], "
+        "textarea[placeholder*='Message']"
+    )
     try:
-        await page.wait_for_selector(composer_selector, state="visible", timeout=45000)
+        await page.wait_for_selector(composer_selector, state="visible", timeout=30000)
+        composer = await _first_visible(page, composer_selector)
+        if composer is None:
+            raise PlaywrightTimeoutError("ChatGPT message composer is not visible")
     except PlaywrightTimeoutError:
         return {
             "reply": (
@@ -95,35 +111,41 @@ async def open_chatgpt(message: str | None = None) -> dict:
             "status": "needs_login",
         }
 
-    composer = page.locator(composer_selector).first
     try:
         await composer.fill(message, timeout=10000)
-        send_button = page.locator("button[data-testid='send-button']").first
-        if await send_button.count() and await send_button.is_visible() and await send_button.is_enabled():
+        send_button_selector = (
+            "button[data-testid='send-button'], "
+            "button[aria-label='Send prompt'], "
+            "button[aria-label*='Send']"
+        )
+        send_button = await _first_visible(page, send_button_selector)
+        if send_button is not None and await send_button.is_enabled():
             await send_button.click(timeout=10000)
         else:
             await composer.press("Enter", timeout=10000)
 
-        # Do not report success until ChatGPT has cleared the submitted composer.
-        cleared = False
-        for _ in range(20):
-            try:
-                remaining = await composer.evaluate(
+        # Verify that the composer cleared and the submitted text is visible in the page.
+        submitted = False
+        for _ in range(40):
+            current_composer = await _first_visible(page, composer_selector)
+            remaining = ""
+            if current_composer is not None:
+                remaining = await current_composer.evaluate(
                     "(el) => ('value' in el ? el.value : (el.innerText || el.textContent || '')).trim()"
                 )
-                if not remaining:
-                    cleared = True
-                    break
-            except Exception:
-                # React may replace the composer node immediately after submission.
-                cleared = True
+            body_text = await page.locator("body").inner_text()
+            if not remaining and message in body_text:
+                submitted = True
                 break
             await page.wait_for_timeout(250)
 
-        if not cleared:
+        if not submitted:
             raise HTTPException(
                 status_code=502,
-                detail="ChatGPT का Send action हुआ, लेकिन message submit होने की पुष्टि नहीं हो सकी। खुले tab को जाँचें।",
+                detail=(
+                    "ChatGPT का Send action हुआ, लेकिन message submit होने की पुष्टि नहीं हो सकी। "
+                    "खुले tab को जाँचें; संदेश दोबारा बोलने से पहले देखें कि वह पहले से भेजा तो नहीं गया।"
+                ),
             )
     except HTTPException:
         raise
@@ -138,3 +160,20 @@ async def open_chatgpt(message: str | None = None) -> dict:
         "action": "chatgpt_message",
         "status": "submitted",
     }
+
+
+async def shutdown_browser():
+    global _playwright, _context
+    async with _browser_lock:
+        if _context is not None:
+            try:
+                await _context.close()
+            except Exception:
+                pass
+            _context = None
+        if _playwright is not None:
+            try:
+                await _playwright.stop()
+            except Exception:
+                pass
+            _playwright = None
