@@ -114,25 +114,24 @@ class AgentAccessibilityService : AccessibilityService() {
         val x = metrics.widthPixels / 2f
         val startY = metrics.heightPixels * .82f
         val endY = metrics.heightPixels * .24f
-        var firstAccepted = false
-
-        repeat(count.coerceIn(1, 20)) { index ->
-            handler.postDelayed({
-                if (!isInstagramForeground()) return@postDelayed
-
-                val path = Path().apply {
-                    moveTo(x, startY)
-                    lineTo(x, endY)
-                }
-                val gesture = GestureDescription.Builder()
-                    .addStroke(GestureDescription.StrokeDescription(path, 0, 430))
-                    .build()
-                val accepted = dispatchGesture(gesture, null, null)
-                if (index == 0) firstAccepted = accepted
-            }, index * 850L)
+        fun dispatchSwipe(): Boolean {
+            if (!isInstagramForeground()) return false
+            val path = Path().apply {
+                moveTo(x, startY)
+                lineTo(x, endY)
+            }
+            val gesture = GestureDescription.Builder()
+                .addStroke(GestureDescription.StrokeDescription(path, 0, 430))
+                .build()
+            return dispatchGesture(gesture, null, null)
         }
 
-        // true means the first gesture was scheduled for an Instagram foreground window.
+        if (!dispatchSwipe()) return false
+        for (index in 1 until count.coerceIn(1, 20)) {
+            handler.postDelayed({
+                dispatchSwipe()
+            }, index * 850L)
+        }
         return true
     }
 }
