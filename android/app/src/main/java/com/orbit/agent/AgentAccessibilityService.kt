@@ -60,7 +60,21 @@ class AgentAccessibilityService : AccessibilityService() {
             }
             node.recycle()
         }
-        return clicked
+        if (clicked) return true
+
+        // Fallback for Instagram builds that hide the Reels label from accessibility.
+        // Reels is conventionally the second item in Instagram's bottom navigation.
+        val metrics = resources.displayMetrics
+        val x = metrics.widthPixels * 0.30f
+        val y = metrics.heightPixels * 0.94f
+        val path = Path().apply {
+            moveTo(x, y)
+            lineTo(x, y)
+        }
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0, 120))
+            .build()
+        return dispatchGesture(gesture, null, null)
     }
 
     private fun collectReelsNodes(
