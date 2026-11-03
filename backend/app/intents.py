@@ -26,7 +26,9 @@ def _extract_message(value: str) -> str | None:
     tail = value[match.end():].strip(" \t\r\n,:;-")
     # Strip command glue, not the actual message content.
     prefixes = (
-        r"^(?:to\s+(?:it|chatgpt)|it|chatgpt|उसको|इसको|उसमें|उसे|करो|करके|भेजो|भेज देना|लिखो|कि|that|saying)\b",
+        r"^(?:to\s+(?:it|chatgpt)|it|chatgpt)\b\s*",
+        r"^(?:उसको|इसको|उसमें|उसे|करो|करके|भेजो|भेज देना|लिखो|कि)\s*",
+        r"^(?:that|saying)\b\s*",
     )
     changed = True
     while changed and tail:
