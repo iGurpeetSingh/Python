@@ -1,16 +1,20 @@
 from contextlib import asynccontextmanager
+import os
 import re
+from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .config import FRONTEND_ORIGIN
+from .config import FRONTEND_ORIGIN, GURI_CLOUD_MODE
 from .core import (
     init_db, save, history, local_answer, open_site, search_web,
     instagram_open, reels_scroll, instagram_reels_scroll, adb,
 )
 from .browser import open_chatgpt, shutdown_browser
+from .device_hub import device_hub
 from .intents import parse_chatgpt_command
 
 
@@ -22,6 +26,39 @@ class Scroll(BaseModel):
     swipes: int = Field(default=3, ge=1, le=30)
 
 
+class PairingRequest(BaseModel):
+    code: str = Field(min_length=6, max_length=256)
+
+
+def require_pairing_code(code: str | None) -> None:
+    if not GURI_CLOUD_MODE:
+        return
+    if not device_hub.verify_code(code):
+        raise HTTPException(
+            status_code=401,
+            detail="Guri pairing code गलत है या missing है। Render Environment में GURI_PAIRING_CODE से मिलाएँ।",
+        )
+
+
+def command_target(message: str) -> str:
+    low = message.casefold()
+    if "instagram" in low or "इंस्टाग्राम" in low or "reels" in low or "रील" in low:
+        return "android"
+    return "windows"
+
+
+def is_supported_cloud_command(message: str) -> bool:
+    low = message.casefold()
+    return (
+        parse_chatgpt_command(message) is not None
+        or any(word in low for word in (
+            "instagram", "इंस्टाग्राम", "reels", "रील",
+            "amazon", "अमेज़न", "google", "गूगल",
+            "youtube", "यूट्यूब", "browser", "new tab", "न्यू टैब", "नया टैब",
+        ))
+    )
+
+
 @asynccontextmanager
 async def lifespan(app):
     init_db()
@@ -31,10 +68,10 @@ async def lifespan(app):
         await shutdown_browser()
 
 
-app = FastAPI(title="Guri Voice Assistant", lifespan=lifespan)
+app = FastAPI(title="Guri Voice Assistant Cloud", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_ORIGIN, "http://127.0.0.1:5173"],
+    allow_origins=[FRONTEND_ORIGIN, "http://localhost:5173", "http://127.0.0.1:5173"],
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
@@ -42,7 +79,40 @@ app.add_middleware(
 
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "agent": "Guri"}
+    devices = await device_hub.device_names() if GURI_CLOUD_MODE else []
+    return {
+        "ok": True,
+        "agent": "Guri",
+        "cloud_mode": GURI_CLOUD_MODE,
+        "pairing_required": GURI_CLOUD_MODE,
+        "connected_devices": devices,
+    }
+
+
+@app.post("/api/pairing/verify")
+async def verify_pairing(body: PairingRequest):
+    if not device_hub.verify_code(body.code):
+        raise HTTPException(status_code=401, detail="Pairing code गलत है।")
+    return {"ok": True, "message": "Guri cloud pairing verified."}
+
+
+@app.get("/api/devices")
+async def list_devices(x_guri_pairing_code: str | None = Header(default=None)):
+    require_pairing_code(x_guri_pairing_code)
+    names = await device_hub.device_names()
+    return {
+        "devices": {
+            "windows": "online" if "windows" in names else "offline",
+            "android": "online" if "android" in names else "offline",
+        }
+    }
+
+
+@app.websocket("/ws/device/{device_id}")
+async def device_socket(websocket: WebSocket, device_id: str):
+    authorization = websocket.headers.get("authorization", "")
+    code = authorization.removeprefix("Bearer ").strip()
+    await device_hub.connect(device_id, websocket, code)
 
 
 @app.get("/api/history")
@@ -52,6 +122,8 @@ async def get_history():
 
 @app.get("/api/mobile/devices")
 async def mobile_devices():
+    if GURI_CLOUD_MODE:
+        return await list_devices()
     try:
         out = await adb("devices")
         return {
@@ -67,27 +139,53 @@ async def mobile_devices():
 
 @app.post("/api/mobile/instagram/open")
 async def open_instagram():
+    if GURI_CLOUD_MODE:
+        result = await device_hub.dispatch("android", "Instagram open karo")
+        return result
     return {"reply": await instagram_open()}
 
 
 @app.post("/api/mobile/instagram/reels/scroll")
 async def scroll(body: Scroll):
+    if GURI_CLOUD_MODE:
+        return await device_hub.dispatch("android", f"Instagram open karo aur Reels {body.swipes} baar scroll karo")
     return {"reply": await reels_scroll(body.swipes)}
 
 
 @app.post("/api/chat")
-async def chat(body: Chat):
+async def chat(
+    body: Chat,
+    x_guri_pairing_code: str | None = Header(default=None),
+):
     msg = body.message.strip()
-    save("user", msg)
     low = msg.casefold()
 
+    if GURI_CLOUD_MODE:
+        require_pairing_code(x_guri_pairing_code)
+        if not is_supported_cloud_command(msg):
+            raise HTTPException(
+                status_code=422,
+                detail="यह command अभी cloud agent में supported नहीं है। Instagram, Reels, browser, Amazon, Google, YouTube और ChatGPT commands उपलब्ध हैं।",
+            )
+        target = command_target(msg)
+        result = await device_hub.dispatch(target, msg)
+        return {
+            "reply": result.get("reply", "Command device तक पहुँचाई गई।"),
+            "action": result.get("action", "device_command"),
+            "status": result.get("status", "completed"),
+            "device": target,
+            "device_result": result,
+        }
+
+    save("user", msg)
     try:
-        # Explicit ChatGPT requests always run as browser actions.
         chatgpt_command = parse_chatgpt_command(msg)
         if chatgpt_command is not None:
-            result = await open_chatgpt(chatgpt_command.message, search_first=chatgpt_command.search_first)
+            result = await open_chatgpt(
+                chatgpt_command.message,
+                search_first=chatgpt_command.search_first,
+            )
 
-        # Instagram open + Reels scroll is one compound command.
         elif (
             ("instagram" in low or "इंस्टाग्राम" in low)
             and any(word in low for word in ["open", "launch", "खोल", "ओपन", "start"])
@@ -176,3 +274,11 @@ async def chat(body: Chat):
 
     save("assistant", result["reply"])
     return result
+
+
+web_dist = Path(os.getenv(
+    "GURI_WEB_DIST",
+    str(Path(__file__).resolve().parents[2] / "frontend" / "dist"),
+))
+if web_dist.exists():
+    app.mount("/", StaticFiles(directory=str(web_dist), html=True), name="guri-web")
