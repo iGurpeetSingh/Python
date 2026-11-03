@@ -1,14 +1,12 @@
-import { useEffect, useRef, useState } from "react";
-import {
-  Bot, Send, Smartphone, Globe, Search, ShoppingBag,
-  Activity, Mic, MicOff, Volume2,
-} from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Mic, MicOff, Bot, LoaderCircle } from "lucide-react";
+import "./style.css";
 
 const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
-async function readApiResponse(response) {
+async function parseResponse(response) {
   const raw = await response.text();
-  let data = {};
+  let data;
   try {
     data = raw ? JSON.parse(raw) : {};
   } catch {
@@ -20,222 +18,158 @@ async function readApiResponse(response) {
   return data;
 }
 
-function explainError(error) {
-  const message = error && error.message ? error.message : String(error);
-  if (/failed to fetch|networkerror|load failed/i.test(message)) {
-    return "Python backend से संपर्क नहीं हो पा रहा। backend terminal में uvicorn चालू करें और http://127.0.0.1:8000/api/health खोलकर जाँचें।";
-  }
-  return "काम नहीं हो पाया: " + message;
+function hasWakeWord(value) {
+  return /गुरी|\\bguri\\b/i.test(value || "");
 }
 
 export default function App() {
-  const [msg, setMsg] = useState([]);
-  const [input, setInput] = useState("");
+  const [active, setActive] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState("Connecting");
-  const [devices, setDevices] = useState([]);
-  const [listening, setListening] = useState(false);
-  const [speak, setSpeak] = useState(true);
-  const end = useRef(null);
-  const recognition = useRef(null);
+  const [status, setStatus] = useState("गुरी तैयार है");
+  const [heard, setHeard] = useState("");
+  const [reply, setReply] = useState("माइक चालू करें और बोलें: गुरी, Instagram खोलो और Reels scroll करो।");
+  const recognitionRef = useRef(null);
+  const activeRef = useRef(false);
+  const busyRef = useRef(false);
+  const restartTimer = useRef(null);
 
   useEffect(() => {
-    fetch(API + "/api/health")
-      .then(readApiResponse)
-      .then(() => setStatus("Backend online"))
-      .catch(() => setStatus("Backend offline"));
-    refresh();
-    fetch(API + "/api/history")
-      .then(readApiResponse)
-      .then((items) => setMsg(items.map((item) => ({ role: item.role, content: item.content }))))
-      .catch(() => {});
-    return () => {
-      try { recognition.current?.stop(); } catch {}
-    };
+    activeRef.current = active;
+  }, [active]);
+
+  useEffect(() => {
+    busyRef.current = busy;
+  }, [busy]);
+
+  const startRecognition = useCallback(() => {
+    if (!activeRef.current || busyRef.current || document.visibilityState !== "visible") return;
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setStatus("इस browser में voice recognition उपलब्ध नहीं है। Chrome इस्तेमाल करें।");
+      setActive(false);
+      activeRef.current = false;
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognitionRef.current = recognition;
+      recognition.lang = "hi-IN";
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+      recognition.onstart = () => setStatus("गुरी सुन रही है…");
+      recognition.onresult = (event) => {
+        const phrase = event.results?.[event.resultIndex]?.[0]?.transcript?.trim() || "";
+        if (!phrase) return;
+        setHeard(phrase);
+        if (!hasWakeWord(phrase)) {
+          setStatus("आदेश से पहले “गुरी” बोलें");
+          return;
+        }
+        void runCommand(phrase);
+      };
+      recognition.onerror = (event) => {
+        if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+          setStatus("Microphone permission दें");
+          setActive(false);
+          activeRef.current = false;
+        } else if (event.error !== "no-speech" && event.error !== "aborted") {
+          setStatus("Voice error: " + event.error);
+        }
+      };
+      recognition.onend = () => {
+        recognitionRef.current = null;
+        if (activeRef.current && !busyRef.current && document.visibilityState === "visible") {
+          restartTimer.current = window.setTimeout(startRecognition, 400);
+        }
+      };
+      recognition.start();
+    } catch (error) {
+      setStatus("Microphone शुरू नहीं हुआ: " + (error?.message || error));
+    }
   }, []);
 
-  useEffect(() => end.current?.scrollIntoView({ behavior: "smooth" }), [msg]);
-
-  async function refresh() {
-    try {
-      const response = await fetch(API + "/api/mobile/devices");
-      const data = await readApiResponse(response);
-      setDevices(data.devices || []);
-    } catch {
-      setDevices([]);
-    }
-  }
-
-  function say(text) {
-    if (!speak || !("speechSynthesis" in window)) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = "hi-IN";
-    window.speechSynthesis.speak(utterance);
-  }
-
-  async function send(text = input) {
-    const command = text.trim();
-    if (!command || busy) return;
-    setInput("");
-    setMsg((items) => [...items, { role: "user", content: command }]);
+  const runCommand = useCallback(async (command) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
+    setStatus("काम कर रही हूँ…");
     try {
       const response = await fetch(API + "/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: command }),
       });
-      const data = await readApiResponse(response);
-      setMsg((items) => [...items, {
-        role: "assistant",
-        content: data.reply,
-        results: data.results || [],
-        status: data.status,
-      }]);
-      say(data.reply);
+      const data = await parseResponse(response);
+      setReply(data.reply || "काम पूरा हुआ।");
+      setStatus(data.status === "needs_login" ? "Login जरूरी है" : "काम पूरा हुआ");
+      if (data.status === "needs_login") {
+        setActive(false);
+        activeRef.current = false;
+      }
     } catch (error) {
-      const detail = explainError(error);
-      setMsg((items) => [...items, { role: "assistant", content: "त्रुटि: " + detail }]);
-      say(detail);
+      const message = error?.message || String(error);
+      const explanation = /failed to fetch|networkerror|load failed/i.test(message)
+        ? "Python service चालू नहीं है। Guri को Start-Guri.bat से खोलें।"
+        : message;
+      setReply("काम नहीं हो पाया: " + explanation);
+      setStatus("दिक्कत आई");
     } finally {
+      busyRef.current = false;
       setBusy(false);
+      if (activeRef.current && document.visibilityState === "visible") {
+        restartTimer.current = window.setTimeout(startRecognition, 700);
+      }
     }
-  }
+  }, [startRecognition]);
 
-  function toggleVoice() {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setMsg((items) => [...items, {
-        role: "assistant",
-        content: "इस browser में voice recognition उपलब्ध नहीं है। Chrome में microphone permission देकर कोशिश करें।",
-      }]);
-      return;
-    }
-    if (listening) {
-      recognition.current?.stop();
-      setListening(false);
-      return;
-    }
-    const instance = new SpeechRecognition();
-    recognition.current = instance;
-    instance.lang = "hi-IN";
-    instance.interimResults = false;
-    instance.maxAlternatives = 1;
-    instance.onresult = (event) => {
-      const spoken = event.results?.[0]?.[0]?.transcript || "";
-      setListening(false);
-      setInput(spoken);
-      send(spoken);
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === "visible" && activeRef.current && !busyRef.current) {
+        startRecognition();
+      } else if (document.visibilityState !== "visible") {
+        try { recognitionRef.current?.stop(); } catch {}
+      }
     };
-    instance.onerror = () => setListening(false);
-    instance.onend = () => setListening(false);
-    instance.start();
-    setListening(true);
-  }
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.clearTimeout(restartTimer.current);
+      try { recognitionRef.current?.stop(); } catch {}
+    };
+  }, [startRecognition]);
 
-  async function mobile(path, body = {}) {
-    setBusy(true);
-    try {
-      const response = await fetch(API + path, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await readApiResponse(response);
-      setMsg((items) => [...items, { role: "assistant", content: data.reply }]);
-      say(data.reply);
-      refresh();
-    } catch (error) {
-      const detail = explainError(error);
-      setMsg((items) => [...items, { role: "assistant", content: "त्रुटि: " + detail }]);
-      say(detail);
-    } finally {
-      setBusy(false);
+  function toggleListening() {
+    if (activeRef.current) {
+      activeRef.current = false;
+      setActive(false);
+      window.clearTimeout(restartTimer.current);
+      try { recognitionRef.current?.stop(); } catch {}
+      setStatus("गुरी pause है");
+      return;
     }
+    activeRef.current = true;
+    setActive(true);
+    setStatus("Microphone चालू हो रहा है…");
+    startRecognition();
   }
 
   return (
-    <div className="app">
-      <aside>
-        <div className="brand"><Bot /><span><b>ORBIT AGENT</b><small>PERSONAL AUTOMATION</small></span></div>
-        <label>WORKSPACE</label>
-        <div className="nav">⌘　Agent Console</div>
-        <label>QUICK ACTIONS</label>
-        <button onClick={() => send("Open Amazon")}><ShoppingBag />Open Amazon</button>
-        <button onClick={() => send("Open Google")}><Search />Open Google</button>
-        <button onClick={() => send("Open YouTube")}><Globe />Open YouTube</button>
-        <button onClick={() => send("New Tab में ChatGPT खोलो")}><Bot />Open ChatGPT</button>
-        <label>ANDROID PHONE (USB)</label>
-        <div className="device"><Smartphone size={16} />{devices.join(", ") || "No authorized device"}</div>
-        <button onClick={() => mobile("/api/mobile/instagram/open")}>◎　Open Instagram</button>
-        <button onClick={() => mobile("/api/mobile/instagram/reels/scroll", { swipes: 3 })}><Activity />Scroll Reels × 3</button>
-        <div className="status">{status}<small>LOCAL DEVELOPMENT</small></div>
-      </aside>
-
-      <main>
-        <header>
-          <div><small>YOUR LOCAL AI WORKSPACE</small><h1>Agent Console</h1></div>
-          <span>● PYTHON + REACT</span>
-        </header>
-        <section className="welcome">
-          <Bot size={34} />
-          <div>
-            <h2>Tell me naturally. I’ll handle the task.</h2>
-            <p>Type or speak in Hindi or English. The agent will perform available actions and report the result.</p>
-          </div>
-        </section>
-        <section className="shortcuts">
-          <button onClick={() => send("Amazon पर सबसे सस्ती watch खोजो")}>🛍 Find a product<small>Amazon price results</small></button>
-          <button onClick={() => send("Google पर Python automation खोजो")}>⌕ Search web<small>Search snippets</small></button>
-          <button onClick={() => send("New Tab में ChatGPT खोलो और उसको मैसेज करो कि क्या काम कर रहे हो")}>✉ Ask ChatGPT<small>Open tab and send a message</small></button>
-        </section>
-        <section className="chat">
-          <div className="chathead">
-            <Activity size={15} /> AGENT ACTIVITY
-            <small>{msg.length} messages</small>
-            <button className="speak-toggle" onClick={() => setSpeak((value) => !value)} title="Toggle spoken replies">
-              <Volume2 size={15} />{speak ? "Voice on" : "Voice off"}
-            </button>
-          </div>
-          <div className="feed">
-            {!msg.length && (
-              <div className="empty">
-                <Bot size={32} /><b>Your agent is ready</b>
-                <p>Try “New Tab में ChatGPT खोलो और उसको मैसेज करो कि क्या काम कर रहे हो”.</p>
-              </div>
-            )}
-            {msg.map((item, index) => (
-              <article className={item.role} key={index}>
-                <b>{item.role === "user" ? "YOU" : "ORBIT AGENT"}</b>
-                <p>{item.content}</p>
-                {item.results?.map((result, resultIndex) => (
-                  <div className="result" key={resultIndex}>
-                    <strong>{resultIndex + 1}. {result.title}</strong>
-                    <span>{result.price || result.snippet || ""}</span>
-                    {result.url && <a href={result.url} target="_blank" rel="noreferrer">Open result ↗</a>}
-                  </div>
-                ))}
-              </article>
-            ))}
-            {busy && <div className="working">Agent is working…</div>}
-            <div ref={end} />
-          </div>
-          <form onSubmit={(event) => { event.preventDefault(); send(); }}>
-            <input
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              placeholder="बोलिए या अपना काम लिखिए…"
-              disabled={busy}
-            />
-            <button type="button" className={listening ? "mic listening" : "mic"} onClick={toggleVoice} disabled={busy} title="Speak a command">
-              {listening ? <MicOff size={18} /> : <Mic size={18} />}
-            </button>
-            <button type="submit" disabled={busy || !input.trim()}><Send size={18} /></button>
-          </form>
-          <footer>Microphone requires browser permission · ChatGPT requires a one-time login in the Orbit browser window</footer>
-        </section>
-      </main>
-    </div>
+    <main className="guri-shell">
+      <div className={"guri-orb" + (active ? " listening" : "") + (busy ? " working" : "")}>
+        {busy ? <LoaderCircle className="spin" size={54} /> : <Bot size={58} />}
+      </div>
+      <h1>Guri</h1>
+      <p className="guri-status">{status}</p>
+      <p className="guri-hint">“गुरी” कहकर अपना काम बताइए</p>
+      <button className={"guri-mic" + (active ? " active" : "")} onClick={toggleListening} disabled={busy}>
+        {active ? <MicOff size={23} /> : <Mic size={23} />}
+        {active ? "सुनना बंद करें" : "Guri को सुनाएँ"}
+      </button>
+      {heard && <section className="guri-message"><small>आपने कहा</small><p>{heard}</p></section>}
+      <section className="guri-message response"><small>Guri</small><p>{reply}</p></section>
+      <p className="guri-footnote">Voice mode शुरू करने के लिए एक बार माइक दबाएँ। आदेश पूरा होने पर Guri फिर सुनना शुरू करेगी।</p>
+    </main>
   );
 }
