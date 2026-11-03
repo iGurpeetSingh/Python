@@ -100,7 +100,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         val askedToScroll = command.contains("scroll") || command.contains("स्क्रॉल") || command.contains("अगली")
                         if (askedToScroll && reelsOpened) {
                             status.postDelayed({
-                                val count = Regex("\\\\d+").find(command)?.value?.toIntOrNull()?.coerceIn(1, 20) ?: 3
+                                val count = Regex("\\d+").find(command)?.value?.toIntOrNull()?.coerceIn(1, 20) ?: 3
                                 if (AgentAccessibilityService.instance?.swipeReels(count) == true) reply("Reels पर $count बार स्क्रॉल कर दिया।")
                                 else reply("Reels स्क्रीन पर स्क्रॉल नहीं कर पाया।")
                             }, 900)
