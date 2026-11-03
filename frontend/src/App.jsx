@@ -4,6 +4,9 @@ import "./style.css";
 
 const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 const isMobileBrowser = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+const isSecureHostedPage =
+  window.location.protocol === "https:" &&
+  !["localhost", "127.0.0.1"].includes(window.location.hostname);
 
 async function parseResponse(response) {
   const raw = await response.text();
@@ -25,16 +28,61 @@ function cleanCommand(phrase) {
     .trim();
 }
 
+function explainConnectionError(error) {
+  const message = error?.message || String(error);
+  if (/failed to fetch|networkerror|load failed|fetch failed/i.test(message)) {
+    if (isMobileBrowser) {
+      return "यह Guri webpage है, Android app नहीं। फोन का browser Python backend तक नहीं पहुँच रहा। Instagram खोलने और scroll करने के लिए फोन में installed Guri Android app खोलें।";
+    }
+    if (isSecureHostedPage) {
+      return "आप Guri को online HTTPS webpage से चला रहे हैं। यह webpage आपके PC के local Python service से सुरक्षित रूप से connect नहीं कर पा रहा। Windows पर repository के अंदर Start-Guri.bat चलाएँ और उसी PC पर http://127.0.0.1:5173 खोलें।";
+    }
+    return "इस कंप्यूटर पर Guri Python service उपलब्ध नहीं है। Start-Guri.bat इसी कंप्यूटर पर चलाएँ। फिर http://127.0.0.1:8000/api/health खोलें; वहाँ { ok: true, agent: Guri } दिखना चाहिए।";
+  }
+  return message;
+}
+
 export default function App() {
   const [active, setActive] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState("गुरी तैयार है");
+  const [status, setStatus] = useState("Guri service जाँच रही है…");
   const [heard, setHeard] = useState("");
-  const [reply, setReply] = useState("माइक चालू करें और सीधे अपना आदेश बोलें। “गुरी” कहना जरूरी नहीं।");
+  const [reply, setReply] = useState("माइक दबाएँ और सीधे आदेश बोलें।");
+  const [backendReady, setBackendReady] = useState(false);
   const recognitionRef = useRef(null);
   const activeRef = useRef(false);
   const busyRef = useRef(false);
   const restartTimer = useRef(null);
+
+  const checkBackend = useCallback(async () => {
+    if (isMobileBrowser) {
+      setBackendReady(false);
+      setStatus("मोबाइल पर Instagram के लिए Android Guri app खोलें");
+      return false;
+    }
+    try {
+      const response = await fetch(API + "/api/health", { cache: "no-store" });
+      const data = await parseResponse(response);
+      if (!data.ok || data.agent !== "Guri") {
+        throw new Error("इस address पर Guri backend नहीं चल रहा।");
+      }
+      setBackendReady(true);
+      setStatus("Guri connected — आवाज़ दें");
+      return true;
+    } catch (error) {
+      setBackendReady(false);
+      setStatus(explainConnectionError(error));
+      return false;
+    }
+  }, []);
+
+  useEffect(() => {
+    void checkBackend();
+    const interval = window.setInterval(() => {
+      if (!activeRef.current && !busyRef.current) void checkBackend();
+    }, 10000);
+    return () => window.clearInterval(interval);
+  }, [checkBackend]);
 
   useEffect(() => {
     activeRef.current = active;
@@ -63,22 +111,27 @@ export default function App() {
     const command = cleanCommand(spokenText) || (spokenText || "").trim();
     if (!command) return;
 
+    const isPhoneAutomation =
+      /(instagram|इंस्टाग्राम|reels|रील|open app|ऐप खोल)/i.test(command);
+    if (isMobileBrowser && isPhoneAutomation) {
+      const message = "Instagram control के लिए Guri Android app खोलें। यह webpage दूसरी apps को tap या scroll नहीं कर सकता।";
+      setReply(message);
+      setStatus("Native Android Guri app इस्तेमाल करें");
+      await speakReply(message);
+      return;
+    }
+
     busyRef.current = true;
     setBusy(true);
     setStatus("आदेश मिला — काम शुरू कर रही हूँ…");
 
     try {
-      // A mobile web page cannot operate other installed apps. Native Guri is required.
-      if (
-        isMobileBrowser &&
-        /(instagram|इंस्टाग्राम|reels|रील|open app|ऐप खोल)/i.test(command)
-      ) {
-        const message = "आप अभी मोबाइल browser वाली Guri चला रहे हैं। यह browser दूसरी apps को tap या scroll नहीं कर सकता। Instagram control के लिए Guri Android app खोलें।";
-        setReply(message);
-        setStatus("Android app खोलें");
-        await speakReply(message);
-        return;
+      const healthResponse = await fetch(API + "/api/health", { cache: "no-store" });
+      const health = await parseResponse(healthResponse);
+      if (!health.ok || health.agent !== "Guri") {
+        throw new Error("Guri local backend गलत या unavailable है।");
       }
+      setBackendReady(true);
 
       const response = await fetch(API + "/api/chat", {
         method: "POST",
@@ -99,15 +152,10 @@ export default function App() {
       }
       await speakReply(answer);
     } catch (error) {
-      const message = error?.message || String(error);
-      const explanation = /failed to fetch|networkerror|load failed/i.test(message)
-        ? (isMobileBrowser
-          ? "मोबाइल browser को अपने फोन पर Python backend नहीं मिला। फोन पर Instagram control करने के लिए native Guri Android app इस्तेमाल करें।"
-          : "Python backend चालू नहीं है। Windows पर Start-Guri.bat पर double-click करें।")
-        : message;
-      const answer = "काम नहीं हो पाया: " + explanation;
+      setBackendReady(false);
+      const answer = "काम नहीं हो पाया: " + explainConnectionError(error);
       setReply(answer);
-      setStatus("दिक्कत आई");
+      setStatus("Backend connection नहीं है");
       await speakReply(answer);
     } finally {
       busyRef.current = false;
@@ -207,14 +255,20 @@ export default function App() {
       </div>
       <h1>Guri</h1>
       <p className="guri-status">{status}</p>
-      <p className="guri-hint">माइक दबाएँ और सीधे आदेश बोलें — “गुरी” कहना जरूरी नहीं</p>
+      <p className="guri-hint">
+        {backendReady ? "माइक दबाएँ और सीधे आदेश बोलें" : "पहले Guri local service से connection चाहिए"}
+      </p>
       <button className={"guri-mic" + (active ? " active" : "")} onClick={toggleListening} disabled={busy}>
         {active ? <MicOff size={23} /> : <Mic size={23} />}
         {active ? "सुनना बंद करें" : "Guri को सुनाएँ"}
       </button>
       {heard && <section className="guri-message"><small>आपने कहा</small><p>{heard}</p></section>}
       <section className="guri-message response"><small>Guri</small><p>{reply}</p></section>
-      <p className="guri-footnote">Guri जवाब बोलकर सुनाएगी और अगला आदेश सुनने के लिए फिर तैयार होगी। मोबाइल apps को control करने के लिए Android Guri app इस्तेमाल करें।</p>
+      <p className="guri-footnote">
+        {isMobileBrowser
+          ? "फोन पर Instagram control के लिए installed Guri Android app खोलें।"
+          : "Guri desktop commands के लिए Python backend इसी PC पर चालू होना जरूरी है।"}
+      </p>
     </main>
   );
 }
