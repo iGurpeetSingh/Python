@@ -12,12 +12,14 @@ The launcher creates the Python environment, installs backend packages, installs
 
 If startup fails, the launcher shows the actual error. Diagnostic logs are saved under `%TEMP%\guri-backend-error.log` and `%TEMP%\guri-frontend-error.log`.
 
-In the Guri page, press the microphone once, grant microphone permission, and say a command beginning with the wake word **Guri**, for example:
+In the Guri page, press the microphone once and grant microphone permission. Speak directly; saying "Guri" is optional because the microphone button is already an explicit command trigger.
 
-- "Guri, open ChatGPT in a new tab."
-- "Guri, open ChatGPT and message it saying what are you working on."
+Examples:
+- "Amazon खोलो"
+- "New Tab खोलो, ChatGPT search करो और उसको message Hi"
+- "ChatGPT को खोलकर message करो कि Hello"
 
-The browser voice interface re-arms listening after each command while the page remains visible. Browser speech recognition is provided by the browser and may require an internet connection.
+The browser voice interface speaks its response and re-arms listening after each command while the page remains visible. Browser speech recognition is provided by the browser and may require an internet connection.
 
 ## Android phone — Python backend not required
 
@@ -37,7 +39,9 @@ Say:
 
 For the combined Instagram command, Guri launches Instagram, looks for the visible Reels tab through Android Accessibility, taps it, and sends the requested swipe gestures. Instagram must be installed and signed in.
 
-**Android listening limitation:** Android does not allow an ordinary app to keep using the microphone invisibly at all times. This version listens while the Guri app is open; after it launches Instagram, it pauses listening. Return to Guri before speaking another command. A system-wide, screen-off wake phrase requires a separate foreground microphone service and explicit Android notification/permission handling.
+**Android listening limitation:** Android does not allow an ordinary app to keep using the microphone invisibly at all times. This version listens while the Guri app is open. When Guri launches Instagram, it stops listening but continues the one-shot Reels tap/scroll action through Accessibility. Return to Guri before speaking another command. A system-wide, screen-off wake phrase requires a separate foreground microphone service and explicit Android notification/permission handling.
+
+**Important:** Opening the Guri React webpage on a phone does not grant it permission to tap or scroll other installed apps. Use the native Android Guri APK for Instagram control. The desktop webpage uses the Python backend on the same computer.
 
 ## ChatGPT browser automation
 
