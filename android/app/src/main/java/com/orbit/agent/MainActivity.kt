@@ -444,8 +444,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
 
         val service = AgentAccessibilityService.instance
-        if ((hasInstagram || asksReels || asksScroll) && !accessibilityEnabled()) {
-            sendCloudResult(requestId, "Android Accessibility में Guri Voice Assistant enable करें।", false)
+        if ((asksReels || asksScroll) && !accessibilityEnabled()) {
+            sendCloudResult(requestId, "Reels tap/scroll के लिए Android Accessibility में Guri Voice Assistant enable करें।", false)
             return
         }
 
