@@ -14,8 +14,11 @@ import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.view.Gravity
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.text.InputType
+import org.json.JSONObject
 import java.util.Locale
 
 class MainActivity : Activity(), TextToSpeech.OnInitListener {
@@ -25,6 +28,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var status: TextView
     private lateinit var micButton: Button
     private lateinit var accessibilityButton: Button
+    private lateinit var cloudUrlInput: EditText
+    private lateinit var cloudCodeInput: EditText
+    private lateinit var cloudStatus: TextView
+    private var cloudClient: GuriCloudSocket? = null
     private var listeningEnabled = true
     private var isResumed = false
     private var actionRunning = false
@@ -87,13 +94,52 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
         }
 
+        cloudStatus = TextView(this).apply {
+            text = "Guri Cloud: disconnected"
+            textSize = 12f
+            gravity = Gravity.CENTER
+            setTextColor(android.graphics.Color.LTGRAY)
+            setPadding(0, 22, 0, 6)
+        }
+        cloudUrlInput = EditText(this).apply {
+            hint = "Guri Cloud URL (https://...)"
+            textSize = 13f
+            setSingleLine(true)
+            setTextColor(android.graphics.Color.WHITE)
+            setHintTextColor(android.graphics.Color.GRAY)
+        }
+        cloudCodeInput = EditText(this).apply {
+            hint = "Render GURI_PAIRING_CODE"
+            textSize = 13f
+            setSingleLine(true)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setTextColor(android.graphics.Color.WHITE)
+            setHintTextColor(android.graphics.Color.GRAY)
+        }
+        val preferences = getSharedPreferences("guri_cloud", MODE_PRIVATE)
+        cloudUrlInput.setText(preferences.getString("url", ""))
+        cloudCodeInput.setText(preferences.getString("code", ""))
+
+        val connectCloudButton = Button(this).apply {
+            text = "Guri Cloud से Connect करें"
+            setOnClickListener { connectCloud() }
+        }
+
         layout.addView(orb)
         layout.addView(status)
         layout.addView(hint)
         layout.addView(micButton)
         layout.addView(accessibilityButton)
+        layout.addView(cloudStatus)
+        layout.addView(cloudUrlInput)
+        layout.addView(cloudCodeInput)
+        layout.addView(connectCloudButton)
         setContentView(layout)
         updateAccessibilityButton()
+        if (preferences.getString("url", "").orEmpty().isNotBlank() &&
+            preferences.getString("code", "").orEmpty().isNotBlank()) {
+            handler.postDelayed({ connectCloud() }, 900)
+        }
 
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_AUDIO)
@@ -105,6 +151,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         isResumed = true
         updateAccessibilityButton()
         if (!actionRunning) status.text = lastActionResult
+        if (cloudClient == null) {
+            val preferences = getSharedPreferences("guri_cloud", MODE_PRIVATE)
+            if (preferences.getString("url", "").orEmpty().isNotBlank() &&
+                preferences.getString("code", "").orEmpty().isNotBlank()) {
+                handler.postDelayed({ connectCloud() }, 500)
+            }
+        }
         if (listeningEnabled && hasAudioPermission()) {
             handler.postDelayed({ startListening() }, 650)
         }
@@ -310,7 +363,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         speakAndListen("यह आदेश अभी समझ नहीं आया। Instagram खोलो और Reels scroll करो बोलकर देखें।")
     }
 
-    private fun attemptOpenReels(command: String, attempts: Int) {
+    private fun attemptOpenReels(
+        command: String,
+        attempts: Int,
+        onComplete: ((String, Boolean) -> Unit)? = null
+    ) {
         handler.postDelayed({
             val opened = AgentAccessibilityService.instance?.openReelsTab() == true
             if (!opened && attempts < 4) {
@@ -330,14 +387,109 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     }
                     actionRunning = false
                     tts?.speak(lastActionResult, TextToSpeech.QUEUE_FLUSH, null, "guri-action-result")
+                    onComplete?.invoke(lastActionResult, queued)
                 }, 900)
             } else {
                 lastActionResult = if (opened) "Instagram Reels खोल दिए।"
                     else "Instagram खुल गया, लेकिन Reels tab नहीं मिला।"
                 actionRunning = false
                 tts?.speak(lastActionResult, TextToSpeech.QUEUE_FLUSH, null, "guri-action-result")
+                onComplete?.invoke(lastActionResult, opened)
             }
         }, if (attempts == 0) 1700 else 700)
+    }
+
+
+    private fun connectCloud() {
+        val serverUrl = cloudUrlInput.text.toString().trim()
+        val code = cloudCodeInput.text.toString().trim()
+        if (serverUrl.isBlank() || code.isBlank()) {
+            cloudStatus.text = "Guri Cloud URL और pairing code भरें।"
+            return
+        }
+
+        getSharedPreferences("guri_cloud", MODE_PRIVATE).edit()
+            .putString("url", serverUrl)
+            .putString("code", code)
+            .apply()
+
+        cloudClient?.close()
+        cloudClient = GuriCloudSocket().also { client ->
+            cloudStatus.text = "Guri Cloud से connect हो रहा है…"
+            client.connect(
+                serverUrl,
+                code,
+                { message -> runOnUiThread { cloudStatus.text = message } },
+                { requestId, command ->
+                    runOnUiThread { handleCloudCommand(requestId, command) }
+                }
+            )
+        }
+    }
+
+    private fun handleCloudCommand(requestId: String, rawCommand: String) {
+        val command = rawCommand.lowercase(Locale.ROOT)
+        val hasInstagram = command.contains("instagram") || command.contains("इंस्टाग्राम")
+        val asksReels = command.contains("reel") || command.contains("रील")
+        val asksScroll = command.contains("scroll") ||
+            command.contains("स्क्रॉल") || command.contains("स्क्रोल") || command.contains("अगली")
+
+        if (!hasInstagram && !asksReels && !asksScroll) {
+            sendCloudResult(
+                requestId,
+                "Android पर यह command supported नहीं है। Instagram और Reels commands उपलब्ध हैं।",
+                false
+            )
+            return
+        }
+
+        val service = AgentAccessibilityService.instance
+        if ((hasInstagram || asksReels || asksScroll) && !accessibilityEnabled()) {
+            sendCloudResult(requestId, "Android Accessibility में Guri Voice Assistant enable करें।", false)
+            return
+        }
+
+        val launch = packageManager.getLaunchIntentForPackage("com.instagram.android")
+        if (launch == null) {
+            sendCloudResult(requestId, "Instagram इस फोन में install नहीं है।", false)
+            return
+        }
+
+        actionRunning = true
+        val alreadyForeground = service?.isInstagramForeground() == true
+        if (!alreadyForeground || hasInstagram) {
+            try {
+                startActivity(launch)
+            } catch (error: Exception) {
+                actionRunning = false
+                sendCloudResult(requestId, "Instagram launch नहीं हुआ: " + (error.localizedMessage ?: ""), false)
+                return
+            }
+        }
+
+        if (asksReels || asksScroll) {
+            attemptOpenReels(command, 0) { result, success ->
+                sendCloudResult(requestId, result, success)
+                actionRunning = false
+            }
+        } else {
+            val result = "Instagram फोन में खोल दिया।"
+            lastActionResult = result
+            actionRunning = false
+            sendCloudResult(requestId, result, true)
+        }
+    }
+
+    private fun sendCloudResult(requestId: String, message: String, success: Boolean) {
+        status.text = message
+        lastActionResult = message
+        tts?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "guri-cloud-result")
+        val statusValue = if (success) "completed" else "failed"
+        val payload = JSONObject()
+            .put("reply", message)
+            .put("action", "instagram")
+            .put("status", statusValue)
+        cloudClient?.sendResult(requestId, payload)
     }
 
     private fun extractCount(command: String): Int {
@@ -365,6 +517,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         handler.removeCallbacksAndMessages(null)
         recognizer?.destroy()
         recognizer = null
+        cloudClient?.close()
+        cloudClient = null
         tts?.shutdown()
         super.onDestroy()
     }
