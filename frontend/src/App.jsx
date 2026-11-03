@@ -3,6 +3,7 @@ import { Mic, MicOff, Bot, LoaderCircle } from "lucide-react";
 import "./style.css";
 
 const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+const isMobileBrowser = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
 
 async function parseResponse(response) {
   const raw = await response.text();
@@ -18,8 +19,10 @@ async function parseResponse(response) {
   return data;
 }
 
-function hasWakeWord(value) {
-  return /गुरी|\bguri\b/i.test(value || "");
+function cleanCommand(phrase) {
+  return (phrase || "")
+    .replace(/^\s*(?:गुरी|guri)\s*[,،:;-]?\s*/i, "")
+    .trim();
 }
 
 export default function App() {
@@ -27,7 +30,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("गुरी तैयार है");
   const [heard, setHeard] = useState("");
-  const [reply, setReply] = useState("माइक चालू करें और बोलें: गुरी, Instagram खोलो और Reels scroll करो।");
+  const [reply, setReply] = useState("माइक चालू करें और सीधे अपना आदेश बोलें। “गुरी” कहना जरूरी नहीं।");
   const recognitionRef = useRef(null);
   const activeRef = useRef(false);
   const busyRef = useRef(false);
@@ -41,11 +44,85 @@ export default function App() {
     busyRef.current = busy;
   }, [busy]);
 
+  const speakReply = useCallback((text) => new Promise((resolve) => {
+    if (!("speechSynthesis" in window) || !text) {
+      resolve();
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "hi-IN";
+    utterance.onend = resolve;
+    utterance.onerror = resolve;
+    window.speechSynthesis.speak(utterance);
+    window.setTimeout(resolve, 12000);
+  }), []);
+
+  const runCommand = useCallback(async (spokenText) => {
+    if (busyRef.current) return;
+    const command = cleanCommand(spokenText) || (spokenText || "").trim();
+    if (!command) return;
+
+    busyRef.current = true;
+    setBusy(true);
+    setStatus("आदेश मिला — काम शुरू कर रही हूँ…");
+
+    try {
+      // A mobile web page cannot operate other installed apps. Native Guri is required.
+      if (
+        isMobileBrowser &&
+        /(instagram|इंस्टाग्राम|reels|रील|open app|ऐप खोल)/i.test(command)
+      ) {
+        const message = "आप अभी मोबाइल browser वाली Guri चला रहे हैं। यह browser दूसरी apps को tap या scroll नहीं कर सकता। Instagram control के लिए Guri Android app खोलें।";
+        setReply(message);
+        setStatus("Android app खोलें");
+        await speakReply(message);
+        return;
+      }
+
+      const response = await fetch(API + "/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: command }),
+      });
+      const data = await parseResponse(response);
+      const answer = data.reply || "काम पूरा हुआ।";
+      setReply(answer);
+      if (data.status === "needs_login") {
+        setStatus("ChatGPT में एक बार login करें");
+        activeRef.current = false;
+        setActive(false);
+      } else if (data.status === "partial") {
+        setStatus("काम आंशिक रूप से हुआ");
+      } else {
+        setStatus("काम पूरा हुआ");
+      }
+      await speakReply(answer);
+    } catch (error) {
+      const message = error?.message || String(error);
+      const explanation = /failed to fetch|networkerror|load failed/i.test(message)
+        ? (isMobileBrowser
+          ? "मोबाइल browser को अपने फोन पर Python backend नहीं मिला। फोन पर Instagram control करने के लिए native Guri Android app इस्तेमाल करें।"
+          : "Python backend चालू नहीं है। Windows पर Start-Guri.bat पर double-click करें।")
+        : message;
+      const answer = "काम नहीं हो पाया: " + explanation;
+      setReply(answer);
+      setStatus("दिक्कत आई");
+      await speakReply(answer);
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+      if (activeRef.current && document.visibilityState === "visible") {
+        restartTimer.current = window.setTimeout(startRecognition, 700);
+      }
+    }
+  }, [speakReply]);
+
   const startRecognition = useCallback(() => {
     if (!activeRef.current || busyRef.current || document.visibilityState !== "visible") return;
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      setStatus("इस browser में voice recognition उपलब्ध नहीं है। Chrome इस्तेमाल करें।");
+      setStatus("इस browser में voice recognition नहीं है। Chrome इस्तेमाल करें।");
       setActive(false);
       activeRef.current = false;
       return;
@@ -63,66 +140,33 @@ export default function App() {
         const phrase = event.results?.[event.resultIndex]?.[0]?.transcript?.trim() || "";
         if (!phrase) return;
         setHeard(phrase);
-        if (!hasWakeWord(phrase)) {
-          setStatus("आदेश से पहले “गुरी” बोलें");
-          return;
-        }
         void runCommand(phrase);
       };
       recognition.onerror = (event) => {
         if (event.error === "not-allowed" || event.error === "service-not-allowed") {
           setStatus("Microphone permission दें");
-          setActive(false);
           activeRef.current = false;
-        } else if (event.error !== "no-speech" && event.error !== "aborted") {
+          setActive(false);
+        } else if (event.error === "no-speech") {
+          setStatus("आवाज़ नहीं मिली — फिर सुन रही हूँ…");
+        } else if (event.error !== "aborted") {
           setStatus("Voice error: " + event.error);
         }
       };
       recognition.onend = () => {
         recognitionRef.current = null;
         if (activeRef.current && !busyRef.current && document.visibilityState === "visible") {
-          restartTimer.current = window.setTimeout(startRecognition, 400);
+          restartTimer.current = window.setTimeout(startRecognition, 450);
         }
       };
       recognition.start();
     } catch (error) {
       setStatus("Microphone शुरू नहीं हुआ: " + (error?.message || error));
-    }
-  }, []);
-
-  const runCommand = useCallback(async (command) => {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setBusy(true);
-    setStatus("काम कर रही हूँ…");
-    try {
-      const response = await fetch(API + "/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: command }),
-      });
-      const data = await parseResponse(response);
-      setReply(data.reply || "काम पूरा हुआ।");
-      setStatus(data.status === "needs_login" ? "Login जरूरी है" : "काम पूरा हुआ");
-      if (data.status === "needs_login") {
-        setActive(false);
-        activeRef.current = false;
-      }
-    } catch (error) {
-      const message = error?.message || String(error);
-      const explanation = /failed to fetch|networkerror|load failed/i.test(message)
-        ? "Python service चालू नहीं है। Guri को Start-Guri.bat से खोलें।"
-        : message;
-      setReply("काम नहीं हो पाया: " + explanation);
-      setStatus("दिक्कत आई");
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
-      if (activeRef.current && document.visibilityState === "visible") {
-        restartTimer.current = window.setTimeout(startRecognition, 700);
+      if (activeRef.current) {
+        restartTimer.current = window.setTimeout(startRecognition, 1000);
       }
     }
-  }, [startRecognition]);
+  }, [runCommand]);
 
   useEffect(() => {
     const onVisibility = () => {
@@ -137,6 +181,7 @@ export default function App() {
       document.removeEventListener("visibilitychange", onVisibility);
       window.clearTimeout(restartTimer.current);
       try { recognitionRef.current?.stop(); } catch {}
+      if ("speechSynthesis" in window) window.speechSynthesis.cancel();
     };
   }, [startRecognition]);
 
@@ -162,14 +207,14 @@ export default function App() {
       </div>
       <h1>Guri</h1>
       <p className="guri-status">{status}</p>
-      <p className="guri-hint">“गुरी” कहकर अपना काम बताइए</p>
+      <p className="guri-hint">माइक दबाएँ और सीधे आदेश बोलें — “गुरी” कहना जरूरी नहीं</p>
       <button className={"guri-mic" + (active ? " active" : "")} onClick={toggleListening} disabled={busy}>
         {active ? <MicOff size={23} /> : <Mic size={23} />}
         {active ? "सुनना बंद करें" : "Guri को सुनाएँ"}
       </button>
       {heard && <section className="guri-message"><small>आपने कहा</small><p>{heard}</p></section>}
       <section className="guri-message response"><small>Guri</small><p>{reply}</p></section>
-      <p className="guri-footnote">Voice mode शुरू करने के लिए एक बार माइक दबाएँ। आदेश पूरा होने पर Guri फिर सुनना शुरू करेगी।</p>
+      <p className="guri-footnote">Guri जवाब बोलकर सुनाएगी और अगला आदेश सुनने के लिए फिर तैयार होगी। मोबाइल apps को control करने के लिए Android Guri app इस्तेमाल करें।</p>
     </main>
   );
 }
