@@ -138,6 +138,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         setContentView(layout)
         updateAccessibilityButton()
         if (cloudAgentMode) {
+            hint.text = "Cloud agent mode — live Guri webpage से आवाज़ दें"
+            status.text = "Guri Cloud agent तैयार हो रहा है…"
             handler.postDelayed({ connectCloud() }, 900)
             micButton.text = "Cloud voice mode"
             micButton.isEnabled = false
