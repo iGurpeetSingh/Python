@@ -104,10 +104,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         super.onResume()
         isResumed = true
         updateAccessibilityButton()
-        if (actionRunning) {
-            status.text = lastActionResult
-            actionRunning = false
-        }
+        if (!actionRunning) status.text = lastActionResult
         if (listeningEnabled && hasAudioPermission()) {
             handler.postDelayed({ startListening() }, 650)
         }
@@ -127,7 +124,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             contentResolver,
             Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
         ) ?: return false
-        val component = "$packageName/\${AgentAccessibilityService::class.java.name}"
+        val component = "$packageName/${AgentAccessibilityService::class.java.name}"
         return enabled.split(':').any { it.equals(component, ignoreCase = true) }
     }
 
@@ -269,6 +266,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             val launch = packageManager.getLaunchIntentForPackage("com.instagram.android")
             if (launch == null) {
                 speakAndListen("Instagram इस फोन में install नहीं है।")
+                return
+            }
+            if ((asksReels || asksScroll) && !accessibilityEnabled()) {
+                updateAccessibilityButton()
+                speakAndListen("पहले फोन Control चालू करें। नीचे का बटन दबाकर Guri Accessibility enable करें।")
                 return
             }
 
