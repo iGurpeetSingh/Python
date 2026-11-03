@@ -20,6 +20,8 @@ This repository includes \`Dockerfile\` and \`render.yaml\` for a single Render 
 4. Render generates a secret called \`GURI_PAIRING_CODE\`. After the service is created, open Render Dashboard → **guri-cloud** → **Environment** and copy this secret. Do not publish or send this value to anyone.
 5. Wait for the service deploy to finish. Your live URL will look like \`https://guri-cloud.onrender.com\` (Render may add a suffix if that name is already taken).
 
+The Blueprint disables automatic redeploys because it is launched through Render's Deploy button. For future GitHub code updates, open Render Dashboard → **guri-cloud** → **Manual Deploy** → **Deploy latest commit**.
+
 The Blueprint starts with Render's **Free** web service plan. When a paired device is connected, the Windows/Android agent sends periodic WebSocket heartbeats, which count as inbound messages and keep the free service active. If all devices disconnect and there is no inbound request/message for 15 minutes, Render can spin the free service down; the next request can take about a minute to wake it. For always-on availability even when no devices are connected, upgrade the service to a paid plan in Render. [Render's current WebSocket guidance](https://render.com/docs/websocket) and [free-plan limits](https://render.com/docs/free) explain this behavior.
 
 Health check:
