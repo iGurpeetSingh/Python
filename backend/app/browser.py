@@ -67,13 +67,38 @@ async def _first_visible(page, selector):
     return None
 
 
-async def open_chatgpt(message: str | None = None) -> dict:
+async def open_chatgpt(message: str | None = None, search_first: bool = False) -> dict:
     """Open ChatGPT in a visible, persistent browser profile and optionally send a message."""
     context = await _get_context()
     page = await context.new_page()
 
     try:
-        await page.goto("https://chatgpt.com/", wait_until="domcontentloaded", timeout=45000)
+        if search_first:
+            # Make the requested search visible in the new tab, then open ChatGPT.
+            try:
+                await page.goto(
+                    "https://www.google.com/search?q=ChatGPT",
+                    wait_until="domcontentloaded",
+                    timeout=30000,
+                )
+                await page.wait_for_timeout(900)
+                official_link = page.locator("a[href*='chatgpt.com']").first
+                if await official_link.count() and await official_link.is_visible():
+                    await official_link.click(timeout=8000)
+                else:
+                    await page.goto(
+                        "https://chatgpt.com/",
+                        wait_until="domcontentloaded",
+                        timeout=45000,
+                    )
+            except PlaywrightTimeoutError:
+                await page.goto(
+                    "https://chatgpt.com/",
+                    wait_until="domcontentloaded",
+                    timeout=45000,
+                )
+        else:
+            await page.goto("https://chatgpt.com/", wait_until="domcontentloaded", timeout=45000)
     except PlaywrightTimeoutError:
         # A slow page can still finish loading; check for the actual composer below.
         pass
@@ -88,6 +113,7 @@ async def open_chatgpt(message: str | None = None) -> dict:
             "reply": "ChatGPT नए browser tab में खोल दिया है।",
             "action": "chatgpt_open",
             "status": "opened",
+            "steps": ["new_tab", "search_chatgpt" if search_first else "open_chatgpt"],
         }
 
     composer_selector = (
@@ -159,6 +185,7 @@ async def open_chatgpt(message: str | None = None) -> dict:
         "reply": f"ChatGPT में message भेज दिया: “{message}”",
         "action": "chatgpt_message",
         "status": "submitted",
+        "steps": (["new_tab", "search_chatgpt", "open_chatgpt"] if search_first else ["new_tab", "open_chatgpt"]) + ["fill_message", "send_message"],
     }
 
 
