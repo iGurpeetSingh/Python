@@ -121,9 +121,10 @@ async def get_history():
 
 
 @app.get("/api/mobile/devices")
-async def mobile_devices():
+async def mobile_devices(x_guri_pairing_code: str | None = Header(default=None)):
     if GURI_CLOUD_MODE:
-        return await list_devices()
+        require_pairing_code(x_guri_pairing_code)
+        return await list_devices(x_guri_pairing_code)
     try:
         out = await adb("devices")
         return {
@@ -138,16 +139,18 @@ async def mobile_devices():
 
 
 @app.post("/api/mobile/instagram/open")
-async def open_instagram():
+async def open_instagram(x_guri_pairing_code: str | None = Header(default=None)):
     if GURI_CLOUD_MODE:
+        require_pairing_code(x_guri_pairing_code)
         result = await device_hub.dispatch("android", "Instagram open karo")
         return result
     return {"reply": await instagram_open()}
 
 
 @app.post("/api/mobile/instagram/reels/scroll")
-async def scroll(body: Scroll):
+async def scroll(body: Scroll, x_guri_pairing_code: str | None = Header(default=None)):
     if GURI_CLOUD_MODE:
+        require_pairing_code(x_guri_pairing_code)
         return await device_hub.dispatch("android", f"Instagram open karo aur Reels {body.swipes} baar scroll karo")
     return {"reply": await reels_scroll(body.swipes)}
 
