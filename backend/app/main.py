@@ -71,8 +71,10 @@ async def lifespan(app):
 app = FastAPI(title="Guri Voice Assistant Cloud", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_ORIGIN, "http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_methods=["GET", "POST"],
+    # The Vercel frontend and Render API use different hostnames.
+    # Cloud commands still require the private GURI_PAIRING_CODE header.
+    allow_origins=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
