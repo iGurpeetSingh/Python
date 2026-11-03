@@ -258,9 +258,14 @@ export default function App() {
       <p className="guri-hint">
         {backendReady ? "माइक दबाएँ और सीधे आदेश बोलें" : "पहले Guri local service से connection चाहिए"}
       </p>
-      <button className={"guri-mic" + (active ? " active" : "")} onClick={toggleListening} disabled={busy}>
+      <button
+        className={"guri-mic" + (active ? " active" : "")}
+        onClick={toggleListening}
+        disabled={busy || (!isMobileBrowser && !backendReady)}
+        title={!isMobileBrowser && !backendReady ? "पहले local Guri backend start करें" : "Voice command"}
+      >
         {active ? <MicOff size={23} /> : <Mic size={23} />}
-        {active ? "सुनना बंद करें" : "Guri को सुनाएँ"}
+        {active ? "सुनना बंद करें" : backendReady || isMobileBrowser ? "Guri को सुनाएँ" : "Backend कनेक्ट नहीं है"}
       </button>
       {heard && <section className="guri-message"><small>आपने कहा</small><p>{heard}</p></section>}
       <section className="guri-message response"><small>Guri</small><p>{reply}</p></section>
