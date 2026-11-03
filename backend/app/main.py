@@ -85,7 +85,7 @@ async def chat(body: Chat):
         # Explicit ChatGPT requests always run as browser actions.
         chatgpt_command = parse_chatgpt_command(msg)
         if chatgpt_command is not None:
-            result = await open_chatgpt(chatgpt_command.message)
+            result = await open_chatgpt(chatgpt_command.message, search_first=chatgpt_command.search_first)
 
         # Instagram open + Reels scroll is one compound command.
         elif (
@@ -114,21 +114,23 @@ async def chat(body: Chat):
                 "status": "completed",
             }
 
-        elif any(x in low for x in ["open amazon", "amazon kholo", "अमेज़न खोल"]):
+        elif (
+            "amazon" in low or "अमेज़न" in low or "अमेज़ॉन" in low
+        ) and any(word in low for word in ["open", "खोल", "ओपन", "start"]):
             result = {
                 "reply": await open_site("https://www.amazon.in"),
                 "action": "open",
                 "status": "completed",
             }
 
-        elif any(x in low for x in ["open google", "google kholo", "गूगल खोल"]):
+        elif ("google" in low or "गूगल" in low) and any(word in low for word in ["open", "खोल", "ओपन"]):
             result = {
                 "reply": await open_site("https://www.google.com"),
                 "action": "open",
                 "status": "completed",
             }
 
-        elif any(x in low for x in ["open youtube", "youtube kholo", "यूट्यूब खोल"]):
+        elif ("youtube" in low or "यूट्यूब" in low) and any(word in low for word in ["open", "खोल", "ओपन"]):
             result = {
                 "reply": await open_site("https://www.youtube.com"),
                 "action": "open",
