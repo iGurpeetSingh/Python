@@ -1,1 +1,4 @@
-<resources><string name="app_name">Orbit Agent</string><string name="accessibility_description">Allows Orbit to perform user-requested taps and swipes on the active screen.</string></resources>
+<resources>
+    <string name="app_name">Guri Voice Assistant</string>
+    <string name="accessibility_description">Allows Guri to perform user-requested taps and swipes on the active screen.</string>
+</resources>
