@@ -2,11 +2,13 @@ package com.orbit.agent
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.content.Intent
 import android.graphics.Path
 import android.os.Handler
 import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import org.json.JSONObject
 import java.util.Locale
 
 class AgentAccessibilityService : AccessibilityService() {
@@ -16,22 +18,68 @@ class AgentAccessibilityService : AccessibilityService() {
     }
 
     private val handler = Handler(Looper.getMainLooper())
+    private var cloudClient: GuriCloudSocket? = null
+    private var connectedCloudUrl = ""
+    private var connectedPairingCode = ""
+    private var statusListener: ((String) -> Unit)? = null
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        val prefs = getSharedPreferences("guri_cloud", MODE_PRIVATE)
+        val url = prefs.getString("url", "").orEmpty()
+        val code = prefs.getString("code", "").orEmpty()
+        if (url.isNotBlank() && code.isNotBlank()) {
+            connectCloud(url, code)
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // The active window is queried only when a user command requests an action.
+        // Window nodes are inspected only when a user command requests an action.
     }
 
     override fun onInterrupt() {}
 
     override fun onDestroy() {
         if (instance === this) instance = null
+        cloudClient?.close()
+        cloudClient = null
+        statusListener = null
         handler.removeCallbacksAndMessages(null)
         super.onDestroy()
+    }
+
+    fun setStatusListener(listener: ((String) -> Unit)?) {
+        statusListener = listener
+    }
+
+    fun connectCloud(serverUrl: String, pairingCode: String) {
+        val url = serverUrl.trim().trimEnd('/')
+        val code = pairingCode.trim()
+        if (url.isBlank() || code.isBlank()) {
+            statusListener?.invoke("Guri Cloud URL और pairing code भरें।")
+            return
+        }
+        if (url == connectedCloudUrl && code == connectedPairingCode && cloudClient != null) {
+            statusListener?.invoke("Guri Cloud connection पहले से शुरू है।")
+            return
+        }
+
+        cloudClient?.close()
+        connectedCloudUrl = url
+        connectedPairingCode = code
+        val client = GuriCloudSocket()
+        cloudClient = client
+        client.connect(
+            url,
+            code,
+            { message ->
+                handler.post { statusListener?.invoke(message) }
+            },
+            { requestId, command ->
+                handler.post { handleCloudCommand(requestId, command) }
+            }
+        )
     }
 
     fun isInstagramForeground(): Boolean {
@@ -65,8 +113,8 @@ class AgentAccessibilityService : AccessibilityService() {
         // Fallback for Instagram builds that hide the Reels label from accessibility.
         // Reels is conventionally the second item in Instagram's bottom navigation.
         val metrics = resources.displayMetrics
-        val x = metrics.widthPixels * 0.30f
-        val y = metrics.heightPixels * 0.94f
+        val x = metrics.widthPixels * .30f
+        val y = metrics.heightPixels * .94f
         val path = Path().apply {
             moveTo(x, y)
             lineTo(x, y)
@@ -128,6 +176,7 @@ class AgentAccessibilityService : AccessibilityService() {
         val x = metrics.widthPixels / 2f
         val startY = metrics.heightPixels * .82f
         val endY = metrics.heightPixels * .24f
+
         fun dispatchSwipe(): Boolean {
             if (!isInstagramForeground()) return false
             val path = Path().apply {
@@ -142,10 +191,103 @@ class AgentAccessibilityService : AccessibilityService() {
 
         if (!dispatchSwipe()) return false
         for (index in 1 until count.coerceIn(1, 20)) {
-            handler.postDelayed({
-                dispatchSwipe()
-            }, index * 850L)
+            handler.postDelayed({ dispatchSwipe() }, index * 850L)
         }
         return true
+    }
+
+    private fun handleCloudCommand(requestId: String, rawCommand: String) {
+        val command = rawCommand.lowercase(Locale.ROOT)
+        val hasInstagram = command.contains("instagram") || command.contains("इंस्टाग्राम")
+        val asksReels = command.contains("reel") || command.contains("रील")
+        val asksScroll = command.contains("scroll") ||
+            command.contains("स्क्रॉल") || command.contains("स्क्रोल") || command.contains("अगली")
+
+        if (!hasInstagram && !asksReels && !asksScroll) {
+            sendCloudResult(requestId, "Android पर Instagram और Reels commands उपलब्ध हैं।", false)
+            return
+        }
+
+        val launch = packageManager.getLaunchIntentForPackage("com.instagram.android")
+        if (launch == null) {
+            sendCloudResult(requestId, "Instagram इस फोन में install नहीं है।", false)
+            return
+        }
+
+        val alreadyOpen = isInstagramForeground()
+        if (!alreadyOpen || hasInstagram) {
+            try {
+                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(launch)
+            } catch (error: Exception) {
+                sendCloudResult(
+                    requestId,
+                    "Instagram launch नहीं हुआ: " + (error.localizedMessage ?: "unknown error"),
+                    false
+                )
+                return
+            }
+        }
+
+        if (asksReels || asksScroll) {
+            handler.postDelayed({
+                executeCloudReels(requestId, command, attempts = 0)
+            }, if (alreadyOpen) 250 else 1700)
+        } else {
+            sendCloudResult(requestId, "Instagram फोन में खोल दिया।", true)
+        }
+    }
+
+    private fun executeCloudReels(requestId: String, command: String, attempts: Int) {
+        val opened = openReelsTab()
+        if (!opened && attempts < 4) {
+            handler.postDelayed({
+                executeCloudReels(requestId, command, attempts + 1)
+            }, 700)
+            return
+        }
+
+        if (!opened) {
+            sendCloudResult(
+                requestId,
+                "Instagram खुल गया, लेकिन Reels tab नहीं मिला। Instagram layout के अनुसार manually खोलें।",
+                false
+            )
+            return
+        }
+
+        if (command.contains("scroll") || command.contains("स्क्रॉल") ||
+            command.contains("स्क्रोल") || command.contains("अगली")) {
+            handler.postDelayed({
+                val count = extractCount(command).coerceIn(1, 20)
+                val sent = swipeReels(count)
+                sendCloudResult(
+                    requestId,
+                    if (sent) "Instagram Reels पर $count बार scroll gesture भेज दिया।"
+                    else "Reels खुल गए, लेकिन scroll gesture नहीं चला।",
+                    sent
+                )
+            }, 900)
+        } else {
+            sendCloudResult(requestId, "Instagram Reels खोल दिए।", true)
+        }
+    }
+
+    private fun extractCount(command: String): Int {
+        Regex("\\\\d+").find(command)?.value?.toIntOrNull()?.let { return it }
+        val hindiNumbers = mapOf(
+            "एक" to 1, "दो" to 2, "तीन" to 3, "चार" to 4, "पांच" to 5, "पाँच" to 5,
+            "छह" to 6, "छः" to 6, "सात" to 7, "आठ" to 8, "नौ" to 9, "दस" to 10
+        )
+        return hindiNumbers.entries.firstOrNull { command.contains(it.key) }?.value ?: 3
+    }
+
+    private fun sendCloudResult(requestId: String, message: String, success: Boolean) {
+        val payload = JSONObject()
+            .put("reply", message)
+            .put("action", "instagram")
+            .put("status", if (success) "completed" else "failed")
+        cloudClient?.sendResult(requestId, payload)
+        statusListener?.invoke(message)
     }
 }
