@@ -1,4 +1,4 @@
-import asyncio, os, re, shutil, sqlite3
+import asyncio, re, shutil, sqlite3
 from datetime import datetime, timezone
 from urllib.parse import quote_plus
 import httpx
@@ -27,11 +27,15 @@ async def local_answer(prompt):
         return None
 
 async def open_site(url):
-    p=await async_playwright().start()
-    browser=await p.chromium.launch(headless=False)
-    page=await browser.new_page()
-    await page.goto(url,wait_until="domcontentloaded",timeout=30000)
-    return "Opened "+url+" — "+(await page.title())+". Browser window is open."
+    async with async_playwright() as p:
+        browser=await p.chromium.launch(headless=False)
+        page=await browser.new_page()
+        await page.goto(url,wait_until="domcontentloaded",timeout=30000)
+        title=await page.title()
+        # Browser context remains alive while this Playwright session is active.
+        # Use a persistent browser profile for long-lived sessions in a later release.
+        await page.wait_for_timeout(1500)
+        return f"Opened {url} — {title or 'page loaded'}. Browser action completed."
 
 async def search_web(query, amazon=False):
     url=("https://www.amazon.in/s?k=" if amazon else "https://www.google.com/search?q=")+quote_plus(query)
@@ -44,7 +48,7 @@ async def search_web(query, amazon=False):
             if amazon:
                 rows=await page.locator('[data-component-type="s-search-result"]').evaluate_all("""els => els.slice(0,25).map(el=>({title:el.querySelector('h2 span')?.innerText?.trim()||'',price:el.querySelector('.a-price .a-offscreen')?.innerText||'',url:el.querySelector('h2 a')?.href||''})).filter(x=>x.title)""")
                 def price(x):
-                    m=re.search(r"[0-9,]+(?:\\.[0-9]+)?",(x.get("price") or "").replace(",",""))
+                    m=re.search(r"\d+(?:\.\d+)?",(x.get("price") or "").replace(",","").replace("₹",""))
                     return float(m.group()) if m else float("inf")
                 return sorted(rows,key=price)[:12]
             return await page.locator("div.MjjYud").evaluate_all("""els=>els.slice(0,8).map(el=>({title:el.querySelector('h3')?.innerText||'',url:el.querySelector('a')?.href||'',snippet:(el.innerText||'').slice(0,300)})).filter(x=>x.title&&x.url.startsWith('http'))""")
@@ -52,19 +56,22 @@ async def search_web(query, amazon=False):
             await browser.close()
 
 def adb_path():
-    p=shutil.which(ADB_PATH)
-    if not p: raise HTTPException(503,"ADB not installed or not in PATH. Install Android Platform Tools.")
-    return p
+    path=shutil.which(ADB_PATH)
+    if not path:
+        raise HTTPException(503,"ADB not installed or not in PATH. Install Android Platform Tools.")
+    return path
 async def adb(*args):
-    p=await asyncio.create_subprocess_exec(adb_path(),*args,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
-    out,err=await p.communicate()
-    if p.returncode: raise HTTPException(503,err.decode(errors="replace"))
+    proc=await asyncio.create_subprocess_exec(adb_path(),*args,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
+    out,err=await proc.communicate()
+    if proc.returncode:
+        raise HTTPException(503,err.decode(errors="replace").strip() or "ADB command failed")
     return out.decode(errors="replace").strip()
 async def phone():
     out=await adb("devices")
-    ds=[x.split()[0] for x in out.splitlines()[1:] if "\\tdevice" in x]
-    if not ds: raise HTTPException(409,"No authorized Android phone. Enable USB debugging and approve this computer.")
-    return ds[0]
+    devices=[line.split()[0] for line in out.splitlines()[1:] if "\tdevice" in line]
+    if not devices:
+        raise HTTPException(409,"No authorized Android phone. Enable USB debugging and approve this computer.")
+    return devices[0]
 async def instagram_open():
     await phone()
     await adb("shell","monkey","-p","com.instagram.android","-c","android.intent.category.LAUNCHER","1")
@@ -72,9 +79,9 @@ async def instagram_open():
 async def reels_scroll(count):
     await phone()
     size=await adb("shell","wm","size")
-    m=re.search(r"(\\d+)x(\\d+)",size)
-    w,h=map(int,m.groups()) if m else (1080,1920)
+    match=re.search(r"(\d+)x(\d+)",size)
+    width,height=map(int,match.groups()) if match else (1080,1920)
     for _ in range(count):
-        await adb("shell","input","swipe",str(w//2),str(int(h*.80)),str(w//2),str(int(h*.25)),"450")
+        await adb("shell","input","swipe",str(width//2),str(int(height*.80)),str(width//2),str(int(height*.25)),"450")
         await asyncio.sleep(.8)
     return f"Sent {count} upward swipe gestures to the current phone screen. Confirm Instagram Reels is foreground."
