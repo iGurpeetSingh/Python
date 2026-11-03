@@ -38,6 +38,14 @@ Expected JSON includes:
 }
 ~~~
 
+## Existing Vercel frontend
+
+You can keep an existing Vercel deployment such as `https://python-puce-nine.vercel.app`. The React page now has a **Guri Cloud URL** field. Enter the deployed Render service URL (for example `https://guri-cloud.onrender.com`) and the generated `GURI_PAIRING_CODE`, then press **Connect**.
+
+Do not enter the Vercel website URL in the Cloud URL field. Vercel serves the static voice page; the Render web service serves `/api/health`, `/api/chat`, pairing APIs and device WebSockets. The Render API accepts browser calls from the Vercel frontend and still protects device-control endpoints with the pairing code.
+
+The Cloud URL and pairing code are stored in the current browser tab's session storage after successful connection. You do not need to rebuild the Vercel frontend merely to enter a different Render URL.
+
 ## 2. Open the live Guri webpage
 
 Open the Render URL in Chrome. Press the microphone button once and grant microphone access.
