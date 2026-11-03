@@ -1,68 +1,64 @@
-# Orbit Personal AI Agent
+# Guri Voice Assistant
 
-React frontend + Python FastAPI backend + optional native Android companion.
+A voice-first assistant with a minimal React voice screen, Python desktop automation backend, and a native Android companion.
 
-## Desktop setup (Windows)
+## Windows desktop — no manual terminal commands
 
-Backend terminal:
-~~~powershell
-cd backend
-py -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-playwright install chromium
-copy .env.example .env
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-~~~
+Install **Python 3.11+** and **Node.js LTS** once. Download/clone this repository, then double-click:
 
-Frontend terminal:
-~~~powershell
-cd frontend
-npm install
-npm run dev
-~~~
+`Start-Guri.bat`
 
-Open http://localhost:5173. Chrome supports the browser microphone button; allow microphone permission. Browser speech recognition support varies.
+The launcher creates the Python environment, installs backend packages, installs Playwright Chromium, installs React packages when needed, starts the Python API and React voice screen, checks the API health endpoint, and opens the Guri page.
 
-## ChatGPT browser control
+If startup fails, the launcher shows the actual error. Diagnostic logs are saved under `%TEMP%\guri-backend-error.log` and `%TEMP%\guri-frontend-error.log`.
 
-Orbit opens a visible, separate browser profile in a new tab. On the first run, sign in to ChatGPT manually in that Orbit browser window. Orbit stores the browser session in backend/browser_profile so you do not need to sign in for every task. Do not put your ChatGPT password or session tokens in .env or source code.
+In the Guri page, press the microphone once, grant microphone permission, and say a command beginning with the wake word **Guri**, for example:
 
-Try saying:
-- "New Tab में ChatGPT खोलो"
-- "New Tab में ChatGPT खोलो और उसको मैसेज करो कि क्या काम कर रहे हो, बस"
+- "Guri, open ChatGPT in a new tab."
+- "Guri, open ChatGPT and message it saying what are you working on."
 
-Orbit sends the requested text only after the ChatGPT message composer is visible. It reports login-required or send-verification errors instead of pretending the message was sent. If ChatGPT changes its page controls, the selectors may need updating.
+The browser voice interface re-arms listening after each command while the page remains visible. Browser speech recognition is provided by the browser and may require an internet connection.
 
-## Local AI (no paid API)
+## Android phone — Python backend not required
 
-Install Ollama, run ollama pull qwen2.5:3b, and keep Ollama running. Configure OLLAMA_MODEL in backend/.env. Without Ollama, only the explicitly implemented commands work; general questions will show a setup message.
+The native Android app runs the voice command and Instagram controls directly on the phone.
 
-## Android companion (native app)
+1. Open the `android` folder in Android Studio and run the app on your phone, or download the debug APK from the GitHub Actions workflow artifact named **Guri-Android-debug** after the build succeeds.
+2. Allow Microphone permission.
+3. Tap **फोन Control चालू करें** once and enable **Guri Voice Assistant** under Android Accessibility settings.
+4. Return to Guri. It starts listening while its app is open.
 
-Open the android folder in Android Studio, allow Gradle sync, then Run on your own Android phone. In Android Settings > Accessibility, enable **Orbit Agent Control**. Return to Orbit, tap Speak, and say commands such as:
-- "Instagram kholo"
-- "Reels kholo"
-- "Agli reel"
-- "Teen baar scroll karo"
+Say:
 
-The companion uses Android SpeechRecognizer + TextToSpeech and an AccessibilityService gesture. It can launch Instagram, attempt to tap a visible Reels label, and swipe only while Instagram is the foreground app. Android may require you to enable the accessibility service manually. Do not enable accessibility for apps you do not trust.
+- "Guri, Instagram open karo."
+- "Guri, Instagram open karo aur Reels scroll karo."
+- "Guri, Reels scroll karo."
+- "Guri, five baar scroll karo."
 
-## Important limitations
+For the combined Instagram command, Guri launches Instagram, looks for the visible Reels tab through Android Accessibility, taps it, and sends the requested swipe gestures. Instagram must be installed and signed in.
 
-- Instagram UI labels/layouts vary; opening Reels is best-effort and may require manual navigation.
-- ChatGPT automation uses its own browser profile, not your already-open personal Chrome profile. Sign in once in the Orbit browser window.
-- This does not bypass login, CAPTCHA, rate limits, or app protections. It does not like, follow, comment, message, or purchase on Instagram.
-- Android restricts background microphone access; use the app's visible Speak button.
-- Never expose the local backend to the public internet without authentication and a security review.
-- This repository has not been built or tested on your specific PC/phone yet. Verify in Android Studio and on a connected device before relying on it.
+**Android listening limitation:** Android does not allow an ordinary app to keep using the microphone invisibly at all times. This version listens while the Guri app is open; after it launches Instagram, it pauses listening. Return to Guri before speaking another command. A system-wide, screen-off wake phrase requires a separate foreground microphone service and explicit Android notification/permission handling.
 
-## Command parser tests
+## ChatGPT browser automation
 
-From the backend directory, run:
+Desktop ChatGPT automation uses a separate visible browser profile at `backend/browser_profile`. On first use, sign in to ChatGPT manually in that Guri-controlled browser window. The session is stored in that local profile; no password or session token is stored in source code.
+
+## Local AI
+
+Install Ollama and run `ollama pull qwen2.5:3b` if you want local conversational answers. Explicit supported voice actions such as opening ChatGPT and supported Instagram commands do not depend on Ollama.
+
+## Safety and limitations
+
+- Guri only performs commands explicitly implemented and reports when a control cannot be found.
+- Instagram UI changes can affect Reels tab discovery; the agent does not bypass login, CAPTCHA, or app protections.
+- Instagram likes, follows, comments, DMs, and purchases are not automated.
+- Never expose the local Python backend to the public internet without authentication and a security review.
+- The project has not been tested on your physical phone or PC in this session. The GitHub Actions Android build checks whether the app compiles, but real-device behavior still requires an on-device test.
+
+## Backend command tests
+
+From the backend directory:
 
 ~~~powershell
 python -m unittest discover -s tests -v
 ~~~
-
-These tests cover the Hindi/English ChatGPT open-and-message phrases and ensure unrelated Instagram requests are not routed to ChatGPT.
