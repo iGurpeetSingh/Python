@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from .config import FRONTEND_ORIGIN
 from .core import (
     init_db, save, history, local_answer, open_site, search_web,
-    instagram_open, reels_scroll, adb,
+    instagram_open, reels_scroll, instagram_reels_scroll, adb,
 )
 from .browser import open_chatgpt, shutdown_browser
 from .intents import parse_chatgpt_command
@@ -31,7 +31,7 @@ async def lifespan(app):
         await shutdown_browser()
 
 
-app = FastAPI(title="Orbit Personal Agent", lifespan=lifespan)
+app = FastAPI(title="Guri Voice Assistant", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[FRONTEND_ORIGIN, "http://127.0.0.1:5173"],
@@ -42,7 +42,7 @@ app.add_middleware(
 
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "agent": "Orbit"}
+    return {"ok": True, "agent": "Guri"}
 
 
 @app.get("/api/history")
@@ -82,27 +82,58 @@ async def chat(body: Chat):
     low = msg.casefold()
 
     try:
-        # Explicit browser actions must be routed to tools, never to the language model.
+        # Explicit ChatGPT requests always run as browser actions.
         chatgpt_command = parse_chatgpt_command(msg)
         if chatgpt_command is not None:
             result = await open_chatgpt(chatgpt_command.message)
 
-        elif any(x in low for x in ["open instagram", "instagram kholo", "इंस्टाग्राम खोल", "इंस्टाग्राम ओपन"]):
-            result = {"reply": await instagram_open(), "action": "instagram_open", "status": "completed"}
+        # Instagram open + Reels scroll is one compound command.
+        elif (
+            ("instagram" in low or "इंस्टाग्राम" in low)
+            and any(word in low for word in ["open", "launch", "खोल", "ओपन", "start"])
+        ):
+            asks_reels = "reel" in low or "रील" in low
+            asks_scroll = any(word in low for word in ["scroll", "स्क्रॉल", "स्क्रोल", "अगली"])
+            if asks_reels and asks_scroll:
+                match = re.search(r"(\d+)", low)
+                count = max(1, min(20, int(match.group(1)))) if match else 3
+                result = await instagram_reels_scroll(count)
+            else:
+                result = {
+                    "reply": await instagram_open(),
+                    "action": "instagram_open",
+                    "status": "completed",
+                }
 
-        elif any(x in low for x in ["scroll reels", "reels scroll", "रील स्क्रॉल", "रील्स स्क्रॉल"]):
+        elif any(x in low for x in ["scroll reels", "reels scroll", "रील स्क्रोल", "रील्स स्क्रोल", "रील स्क्रॉल", "रील्स स्क्रॉल"]):
             match = re.search(r"(\d+)", low)
-            count = max(1, min(30, int(match.group(1)))) if match else 3
-            result = {"reply": await reels_scroll(count), "action": "reels_scroll", "status": "completed"}
+            count = max(1, min(20, int(match.group(1)))) if match else 3
+            result = {
+                "reply": await reels_scroll(count),
+                "action": "reels_scroll",
+                "status": "completed",
+            }
 
         elif any(x in low for x in ["open amazon", "amazon kholo", "अमेज़न खोल"]):
-            result = {"reply": await open_site("https://www.amazon.in"), "action": "open", "status": "completed"}
+            result = {
+                "reply": await open_site("https://www.amazon.in"),
+                "action": "open",
+                "status": "completed",
+            }
 
         elif any(x in low for x in ["open google", "google kholo", "गूगल खोल"]):
-            result = {"reply": await open_site("https://www.google.com"), "action": "open", "status": "completed"}
+            result = {
+                "reply": await open_site("https://www.google.com"),
+                "action": "open",
+                "status": "completed",
+            }
 
         elif any(x in low for x in ["open youtube", "youtube kholo", "यूट्यूब खोल"]):
-            result = {"reply": await open_site("https://www.youtube.com"), "action": "open", "status": "completed"}
+            result = {
+                "reply": await open_site("https://www.youtube.com"),
+                "action": "open",
+                "status": "completed",
+            }
 
         elif "amazon" in low and any(x in low for x in ["search", "find", "watch", "watches", "घड़ी", "खोज", "सर्च"]):
             match = re.search(r"(?:search|find|खोजो|सर्च करो)\s*(?:for)?\s*(.+)", msg, flags=re.I)
