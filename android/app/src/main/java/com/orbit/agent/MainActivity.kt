@@ -163,10 +163,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 }
 
                 override fun onResults(results: Bundle?) {
-                    val phrase = results
+                    val choices = results
                         ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        ?.firstOrNull()
                         .orEmpty()
+                    val phrase = choices.firstOrNull {
+                        val value = it.lowercase(Locale.ROOT)
+                        value.contains("instagram") || value.contains("इंस्टाग्राम") ||
+                            value.contains("reel") || value.contains("रील") ||
+                            value.contains("scroll") || value.contains("स्क्रॉल")
+                    } ?: choices.firstOrNull().orEmpty()
                     handleVoiceInput(phrase)
                 }
 
@@ -229,18 +234,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             return
         }
 
-        val wakeCommand = raw.contains("गुरी", ignoreCase = true) ||
-            Regex("\\bguri\\b", RegexOption.IGNORE_CASE).containsMatchIn(raw)
-
-        if (!wakeCommand) {
-            status.text = "आदेश देने से पहले “गुरी” बोलें।"
-            handler.postDelayed({ startListening() }, 700)
-            return
-        }
-
+        // The assistant is already in an explicit voice session; wake word is optional.
         val command = raw
-            .replace("गुरी", "", ignoreCase = true)
-            .replace(Regex("\\bguri\\b", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("गुरी|गुरि|गुरू|\\bguri\\b", RegexOption.IGNORE_CASE), "")
             .replace(",", " ")
             .replace("，", " ")
             .trim()
@@ -330,14 +326,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     lastActionResult = if (queued) {
                         "Instagram Reels पर $count बार scroll कर दिया।"
                     } else {
-                        "Reels खुल गए, लेकिन scroll नहीं हो पाया।"
+                        "Reels खुल गए, लेकिन scroll gesture नहीं चला।"
                     }
                     actionRunning = false
+                    tts?.speak(lastActionResult, TextToSpeech.QUEUE_FLUSH, null, "guri-action-result")
                 }, 900)
             } else {
                 lastActionResult = if (opened) "Instagram Reels खोल दिए।"
-                    else "Instagram खुल गया, लेकिन Reels button नहीं मिला।"
+                    else "Instagram खुल गया, लेकिन Reels tab नहीं मिला।"
                 actionRunning = false
+                tts?.speak(lastActionResult, TextToSpeech.QUEUE_FLUSH, null, "guri-action-result")
             }
         }, if (attempts == 0) 1700 else 700)
     }
