@@ -209,39 +209,106 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun runCommand(command: String, original: String) {
         status.text = "समझ गई: $original"
-        val hasInstagram = command.contains("instagram") || command.contains("इंस्टाग्राम")
-        val asksReels = command.contains("reel") || command.contains("रील")
-        val asksScroll = command.contains("scroll") || command.contains("स्क्रॉल") || command.contains("स्क्रोल") || command.contains("अगली")
-        if (!hasInstagram && !asksReels && !asksScroll) {
-            speakAndListen("अभी यह command उपलब्ध नहीं है। Instagram खोलो और Reels scroll करो बोलकर देखें।")
+        val service = AgentAccessibilityService.instance
+        val app = resolveTargetApp(command)
+        if (app == null) {
+            speakAndListen("यह ऐप अभी पहचाना नहीं गया। Instagram, WhatsApp, Facebook, Free Fire या PUBG Mobile बोलें।")
             return
         }
-        val launch = packageManager.getLaunchIntentForPackage("com.instagram.android")
-        if (launch == null) {
-            speakAndListen("Instagram इस फोन में install नहीं है।")
-            return
-        }
-        if ((asksReels || asksScroll) && !accessibilityEnabled()) {
+        if (!accessibilityEnabled()) {
             updateAccessibilityButton()
-            speakAndListen("पहले Phone Control चालू करें। नीचे का button दबाकर Guri Accessibility enable करें।")
+            speakAndListen("पहले Phone Control चालू करें। Accessibility में Guri Voice Assistant enable करें।")
+            return
+        }
+        val launch = packageManager.getLaunchIntentForPackage(app.second)
+        if (launch == null) {
+            speakAndListen(app.first + " इस फोन में install नहीं है।")
             return
         }
         actionRunning = true
         stopListening()
-        status.text = "Instagram खोल रही हूँ…"
+        status.text = app.first + " खोल रही हूँ…"
         try {
             launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivity(launch)
         } catch (error: Exception) {
-            actionRunning = false
-            speakAndListen("Instagram नहीं खुल पाया। " + (error.localizedMessage ?: ""))
+            finishAction(app.first + " नहीं खुल पाया: " + (error.localizedMessage ?: ""))
             return
         }
-        if (asksReels || asksScroll) attemptOpenReels(command, 0)
-        else {
-            actionRunning = false
-            speakAndListen("Instagram खोल दिया।")
+
+        val searchText = extractSearchText(command)
+        val wantsHi = command.contains("hi") || command.contains("हाय") || command.contains("हाई")
+        val wantsScroll = command.contains("scroll") || command.contains("स्क्रॉल") ||
+            command.contains("स्क्रोल") || command.contains("अगली") || command.contains("रील")
+        handler.postDelayed({
+            val activeService = AgentAccessibilityService.instance
+            if (activeService == null) {
+                finishAction(app.first + " खुला, लेकिन Accessibility service उपलब्ध नहीं है।")
+                return@postDelayed
+            }
+            when {
+                wantsScroll && app.first == "Instagram" -> {
+                    val opened = activeService.openReelsTab()
+                    if (!opened) finishAction("Instagram खुला, लेकिन Reels tab नहीं मिला।")
+                    else {
+                        val count = extractCount(command).coerceIn(1, 20)
+                        val accepted = activeService.swipeReels(count) { done ->
+                            handler.post { finishAction(if (done) "Instagram Reels पर $count swipe पूरे हुए।" else "Swipe पूरा नहीं हुआ।") }
+                        }
+                        if (!accepted) finishAction("Reels पर swipe शुरू नहीं हुआ।")
+                    }
+                }
+                !searchText.isNullOrBlank() -> {
+                    val clickedSearch = activeService.clickVisibleLabel("search", "खोजें", "खोज")
+                    handler.postDelayed({
+                        val typed = activeService.typeIntoFocusedOrFirstField(searchText)
+                        if (typed) {
+                            finishAction(app.first + " में '$searchText' search field में लिखा है। परिणाम की पुष्टि करके अगला कदम बताइए।")
+                        } else {
+                            finishAction(app.first + " खुला, लेकिन Search field नहीं मिला। Search icon दबाकर फिर बोलें: '$searchText लिखो'।")
+                        }
+                    }, if (clickedSearch) 700 else 450)
+                }
+                wantsHi -> {
+                    val typed = activeService.typeIntoFocusedOrFirstField("Hi")
+                    finishAction(if (typed) app.first + " में Hi message box में लिखा है। भेजने से पहले खुद जाँच लें।"
+                        else app.first + " खुला, लेकिन message field नहीं मिला। पहले chat खोलें।")
+                }
+                else -> finishAction(app.first + " खोल दिया।")
+            }
+        }, 1800)
+    }
+
+    private fun resolveTargetApp(command: String): Pair<String, String>? {
+        val apps = listOf(
+            Triple("instagram", "Instagram", "com.instagram.android"),
+            Triple("इंस्टाग्राम", "Instagram", "com.instagram.android"),
+            Triple("whatsapp", "WhatsApp", "com.whatsapp"),
+            Triple("व्हाट्सएप", "WhatsApp", "com.whatsapp"),
+            Triple("facebook", "Facebook", "com.facebook.katana"),
+            Triple("फेसबुक", "Facebook", "com.facebook.katana"),
+            Triple("free fire", "Free Fire", "com.dts.freefireth"),
+            Triple("free fire india", "Free Fire", "com.dts.freefireth"),
+            Triple("फ्री फायर", "Free Fire", "com.dts.freefireth"),
+            Triple("pubg", "PUBG Mobile", "com.tencent.ig"),
+            Triple("pubg mobile", "PUBG Mobile", "com.tencent.ig"),
+            Triple("पबजी", "PUBG Mobile", "com.tencent.ig")
+        )
+        val found = apps.firstOrNull { command.contains(it.first) } ?: return null
+        return found.second to found.third
+    }
+
+    private fun extractSearchText(command: String): String? {
+        val patterns = listOf(
+            Regex("(?:search|सर्च|खोजो|खोजें|ढूंढो|ढूँढो)\\s+(.+?)(?:\\s+(?:और|फिर|then|लिखो|लिखना|open|खोलो).*)?$", RegexOption.IGNORE_CASE),
+            Regex("(?:में|पर)\\s+(.+?)\\s+(?:सर्च|search|खोजो)", RegexOption.IGNORE_CASE)
+        )
+        for (pattern in patterns) {
+            val match = pattern.find(command) ?: continue
+            val value = match.groupValues.getOrNull(1)?.trim()?.trim(',', '.', ' ')
+            if (!value.isNullOrBlank()) return value
         }
+        return null
     }
 
     private fun attemptOpenReels(command: String, attempts: Int) {
