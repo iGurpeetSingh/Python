@@ -119,7 +119,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun accessibilityEnabled(): Boolean {
         val enabled = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
-        val component = "$packageName/\${AgentAccessibilityService::class.java.name}"
+        val component = packageName + "/" + AgentAccessibilityService::class.java.name
         return enabled.split(':').any { it.equals(component, ignoreCase = true) }
     }
 
@@ -246,18 +246,53 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun attemptOpenReels(command: String, attempts: Int) {
         handler.postDelayed({
-            val opened = AgentAccessibilityService.instance?.openReelsTab() == true
-            if (!opened && attempts < 6) {
-                attemptOpenReels(command, attempts + 1)
+            val service = AgentAccessibilityService.instance
+            if (service == null) {
+                finishAction("Instagram खुल गया, लेकिन Guri Accessibility Service चालू नहीं है।")
                 return@postDelayed
             }
-            if (opened && (command.contains("scroll") || command.contains("स्क्रॉल") || command.contains("स्क्रोल") || command.contains("अगली"))) {
-                handler.postDelayed({
-                    val count = extractCount(command).coerceIn(1, 20)
-                    val queued = AgentAccessibilityService.instance?.swipeReels(count) == true
-                    finishAction(if (queued) "Instagram Reels पर $count बार scroll कर दिया।" else "Reels खुल गए, लेकिन scroll gesture नहीं चला।")
-                }, 1000)
-            } else finishAction(if (opened) "Instagram Reels खोल दिए।" else "Instagram खुल गया, लेकिन Reels tab नहीं मिला।")
+
+            // Capture the actual phone display before deciding which UI control to tap.
+            service.captureCurrentScreen { screenshotCaptured ->
+                handler.post {
+                    if (!service.isInstagramForeground()) {
+                        if (attempts < 6) attemptOpenReels(command, attempts + 1)
+                        else finishAction("Instagram foreground में नहीं आया; screen action रोक दिया।")
+                        return@post
+                    }
+
+                    val opened = service.openReelsTab()
+                    if (!opened && attempts < 6) {
+                        attemptOpenReels(command, attempts + 1)
+                        return@post
+                    }
+                    if (!opened) {
+                        finishAction(
+                            "Instagram खुल गया, लेकिन Reels tab नहीं मिला। " +
+                                if (screenshotCaptured) "Screen capture सफल था।" else "Screen capture उपलब्ध नहीं हुआ।"
+                        )
+                        return@post
+                    }
+
+                    if (command.contains("scroll") || command.contains("स्क्रॉल") ||
+                        command.contains("स्क्रोल") || command.contains("अगली")) {
+                        handler.postDelayed({
+                            val count = extractCount(command).coerceIn(1, 20)
+                            val accepted = service.swipeReels(count) { completed ->
+                                handler.post {
+                                    finishAction(
+                                        if (completed) "Instagram Reels पर $count बार scroll पूरा किया।"
+                                        else "Reels खुले, लेकिन swipe बीच में रुक गया।"
+                                    )
+                                }
+                            }
+                            if (!accepted) finishAction("Reels खुले, लेकिन scroll gesture शुरू नहीं हुआ।")
+                        }, 700)
+                    } else {
+                        finishAction("Instagram Reels खोल दिए।")
+                    }
+                }
+            }
         }, if (attempts == 0) 2200 else 900)
     }
 
