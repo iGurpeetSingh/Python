@@ -263,7 +263,27 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     handler.postDelayed({
                         val typed = activeService.typeIntoFocusedOrFirstField(searchText)
                         if (typed) {
-                            finishAction(app.first + " में '$searchText' search field में लिखा है। परिणाम की पुष्टि करके अगला कदम बताइए।")
+                            status.text = app.first + " में '$searchText' खोज रही हूँ…"
+                            handler.postDelayed({
+                                val resultOpened = activeService.clickVisibleLabel(searchText)
+                                if (!resultOpened) {
+                                    finishAction(app.first + " में '$searchText' search किया, लेकिन matching result accessibility में नहीं मिला।")
+                                } else if (wantsHi) {
+                                    handler.postDelayed({
+                                        val messageAction = activeService.clickVisibleLabel("message", "संदेश", "chat", "मैसेज")
+                                        handler.postDelayed({
+                                            val drafted = activeService.typeIntoFocusedOrFirstField("Hi")
+                                            finishAction(
+                                                if (drafted) "Profile या chat खुली और Hi message field में लिखा है। भेजने से पहले जाँच लें।"
+                                                else if (messageAction) "Chat खुली, लेकिन message field नहीं मिली।"
+                                                else "Search result खुला, लेकिन Message button नहीं मिला।"
+                                            )
+                                        }, 900)
+                                    }, 900)
+                                } else {
+                                    finishAction(app.first + " में '$searchText' वाला result खोला।")
+                                }
+                            }, 1400)
                         } else {
                             finishAction(app.first + " खुला, लेकिन Search field नहीं मिला। Search icon दबाकर फिर बोलें: '$searchText लिखो'।")
                         }
