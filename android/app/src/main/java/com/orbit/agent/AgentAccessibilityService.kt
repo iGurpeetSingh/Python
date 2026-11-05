@@ -4,6 +4,9 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.content.Intent
 import android.graphics.Path
+import android.graphics.Bitmap
+import android.os.Build
+import android.view.Display
 import android.os.Handler
 import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
@@ -82,6 +85,45 @@ class AgentAccessibilityService : AccessibilityService() {
                 handler.post { handleCloudCommand(requestId, command) }
             }
         )
+    }
+
+    /**
+     * Captures the current display in memory for action verification.
+     * The bitmap is immediately released; no screenshot is uploaded or persisted.
+     */
+    fun captureCurrentScreen(onResult: (Boolean) -> Unit) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            val available = rootInActiveWindow != null
+            onResult(available)
+            return
+        }
+        try {
+            takeScreenshot(
+                Display.DEFAULT_DISPLAY,
+                mainExecutor,
+                object : TakeScreenshotCallback {
+                    override fun onSuccess(screenshot: ScreenshotResult) {
+                        val buffer = screenshot.hardwareBuffer
+                        val bitmap = try {
+                            Bitmap.wrapHardwareBuffer(buffer, screenshot.colorSpace)
+                        } catch (_: Exception) {
+                            null
+                        } finally {
+                            buffer.close()
+                        }
+                        val captured = bitmap != null
+                        bitmap?.recycle()
+                        onResult(captured)
+                    }
+
+                    override fun onFailure(errorCode: Int) {
+                        onResult(false)
+                    }
+                }
+            )
+        } catch (_: Exception) {
+            onResult(false)
+        }
     }
 
     fun isInstagramForeground(): Boolean {
@@ -171,16 +213,25 @@ class AgentAccessibilityService : AccessibilityService() {
         return false
     }
 
-    fun swipeReels(count: Int): Boolean {
-        if (!isInstagramForeground()) return false
+    fun swipeReels(count: Int): Boolean = swipeReels(count) {}
 
+    /**
+     * Sends one swipe at a time and waits for Android's gesture callback before
+     * sending the next one. Completion is reported only after all gestures finish.
+     */
+    fun swipeReels(count: Int, onComplete: (Boolean) -> Unit): Boolean {
+        if (!isInstagramForeground()) return false
+        val total = count.coerceIn(1, 20)
         val metrics = resources.displayMetrics
         val x = metrics.widthPixels / 2f
         val startY = metrics.heightPixels * .82f
         val endY = metrics.heightPixels * .24f
 
-        fun dispatchSwipe(): Boolean {
-            if (!isInstagramForeground()) return false
+        fun send(index: Int) {
+            if (!isInstagramForeground()) {
+                onComplete(false)
+                return
+            }
             val path = Path().apply {
                 moveTo(x, startY)
                 lineTo(x, endY)
@@ -188,13 +239,20 @@ class AgentAccessibilityService : AccessibilityService() {
             val gesture = GestureDescription.Builder()
                 .addStroke(GestureDescription.StrokeDescription(path, 0, 430))
                 .build()
-            return dispatchGesture(gesture, null, null)
+            val accepted = dispatchGesture(gesture, object : GestureResultCallback() {
+                override fun onCompleted(gestureDescription: GestureDescription?) {
+                    if (index + 1 >= total) onComplete(true)
+                    else handler.postDelayed({ send(index + 1) }, 550)
+                }
+
+                override fun onCancelled(gestureDescription: GestureDescription?) {
+                    onComplete(false)
+                }
+            }, handler)
+            if (!accepted) onComplete(false)
         }
 
-        if (!dispatchSwipe()) return false
-        for (index in 1 until count.coerceIn(1, 20)) {
-            handler.postDelayed({ dispatchSwipe() }, index * 850L)
-        }
+        send(0)
         return true
     }
 
