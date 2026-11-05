@@ -14,10 +14,8 @@ import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.view.Gravity
 import android.widget.Button
-import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.text.InputType
 import java.util.Locale
 
 class MainActivity : Activity(), TextToSpeech.OnInitListener {
@@ -27,26 +25,19 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var status: TextView
     private lateinit var micButton: Button
     private lateinit var accessibilityButton: Button
-    private lateinit var cloudUrlInput: EditText
-    private lateinit var cloudCodeInput: EditText
-    private lateinit var cloudStatus: TextView
-    private var cloudAgentMode = false
     private var listeningEnabled = true
     private var isResumed = false
     private var actionRunning = false
-    private var lastActionResult = "गुरी तैयार है।"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         tts = TextToSpeech(this, this)
-
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             setPadding(36, 48, 36, 48)
             setBackgroundColor(android.graphics.Color.rgb(8, 14, 26))
         }
-
         val orb = TextView(this).apply {
             text = "G"
             textSize = 64f
@@ -66,7 +57,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setTextColor(android.graphics.Color.WHITE)
         }
         val hint = TextView(this).apply {
-            text = "बोलें: “गुरी, Instagram खोलो और Reels scroll करो”"
+            text = "बोलें: “गुरी, Instagram खोलो और Reels scroll करो”\nGuri खुद Instagram खोलेगी और Reels पर swipe करेगी।"
             textSize = 14f
             gravity = Gravity.CENTER
             setTextColor(android.graphics.Color.LTGRAY)
@@ -88,64 +79,24 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         accessibilityButton = Button(this).apply {
             text = "फोन Control चालू करें"
-            setOnClickListener {
-                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            }
+            setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
         }
-
-        cloudStatus = TextView(this).apply {
-            text = "Guri Cloud: disconnected"
-            textSize = 12f
+        val help = TextView(this).apply {
+            text = "पहली बार केवल दो permissions दें:\n1. Microphone permission\n2. Accessibility में Guri Voice Assistant ON\n\nकोई backend URL, pairing code या Render link नहीं चाहिए।"
+            textSize = 13f
             gravity = Gravity.CENTER
-            setTextColor(android.graphics.Color.LTGRAY)
-            setPadding(0, 22, 0, 6)
+            setTextColor(android.graphics.Color.rgb(150, 190, 205))
+            setPadding(8, 24, 8, 0)
         }
-        cloudUrlInput = EditText(this).apply {
-            this.hint = "Guri Cloud URL (https://...)"
-            textSize = 13f
-            setSingleLine(true)
-            setTextColor(android.graphics.Color.WHITE)
-            setHintTextColor(android.graphics.Color.GRAY)
-        }
-        cloudCodeInput = EditText(this).apply {
-            this.hint = "Render GURI_PAIRING_CODE"
-            textSize = 13f
-            setSingleLine(true)
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setTextColor(android.graphics.Color.WHITE)
-            setHintTextColor(android.graphics.Color.GRAY)
-        }
-        val preferences = getSharedPreferences("guri_cloud", MODE_PRIVATE)
-        cloudUrlInput.setText(preferences.getString("url", ""))
-        cloudCodeInput.setText(preferences.getString("code", ""))
-        cloudAgentMode = preferences.getString("url", "").orEmpty().isNotBlank() &&
-            preferences.getString("code", "").orEmpty().isNotBlank()
-
-        val connectCloudButton = Button(this).apply {
-            text = "Guri Cloud से Connect करें"
-            setOnClickListener { connectCloud() }
-        }
-
         layout.addView(orb)
         layout.addView(status)
         layout.addView(hint)
         layout.addView(micButton)
         layout.addView(accessibilityButton)
-        layout.addView(cloudStatus)
-        layout.addView(cloudUrlInput)
-        layout.addView(cloudCodeInput)
-        layout.addView(connectCloudButton)
+        layout.addView(help)
         setContentView(layout)
         updateAccessibilityButton()
-        if (cloudAgentMode) {
-            hint.text = "Cloud agent mode — live Guri webpage से आवाज़ दें"
-            status.text = "Guri Cloud agent तैयार हो रहा है…"
-            handler.postDelayed({ connectCloud() }, 900)
-            micButton.text = "Cloud voice mode"
-            micButton.isEnabled = false
-        }
-
-        if (!cloudAgentMode && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_AUDIO)
         }
     }
@@ -154,18 +105,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         super.onResume()
         isResumed = true
         updateAccessibilityButton()
-        if (!actionRunning) status.text = lastActionResult
-        val preferences = getSharedPreferences("guri_cloud", MODE_PRIVATE)
-        val savedUrl = preferences.getString("url", "").orEmpty()
-        val savedCode = preferences.getString("code", "").orEmpty()
-        cloudAgentMode = savedUrl.isNotBlank() && savedCode.isNotBlank()
-        if (cloudAgentMode) {
-            micButton.text = "Cloud voice mode"
-            micButton.isEnabled = false
-            handler.postDelayed({ connectCloud() }, 500)
-        } else if (listeningEnabled && hasAudioPermission()) {
-            handler.postDelayed({ startListening() }, 650)
-        }
+        if (listeningEnabled && hasAudioPermission()) handler.postDelayed({ startListening() }, 650)
     }
 
     override fun onPause() {
@@ -174,36 +114,27 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         super.onPause()
     }
 
-    private fun hasAudioPermission(): Boolean =
+    private fun hasAudioPermission() =
         checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
     private fun accessibilityEnabled(): Boolean {
-        val enabled = Settings.Secure.getString(
-            contentResolver,
-            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-        ) ?: return false
-        val component = "$packageName/${AgentAccessibilityService::class.java.name}"
+        val enabled = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
+        val component = "$packageName/\${AgentAccessibilityService::class.java.name}"
         return enabled.split(':').any { it.equals(component, ignoreCase = true) }
     }
 
     private fun updateAccessibilityButton() {
         if (!::accessibilityButton.isInitialized) return
-        accessibilityButton.visibility = if (accessibilityEnabled()) Button.GONE else Button.VISIBLE
+        accessibilityButton.text = if (accessibilityEnabled()) "Phone Control चालू है ✓" else "Phone Control चालू करें"
     }
 
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ) {
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQUEST_AUDIO) {
             if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
                 listeningEnabled = true
                 handler.postDelayed({ startListening() }, 500)
-            } else {
-                status.text = "Voice चलाने के लिए Microphone permission जरूरी है।"
-            }
+            } else status.text = "Voice चलाने के लिए Microphone permission जरूरी है।"
         }
     }
 
@@ -213,35 +144,18 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             return false
         }
         if (recognizer != null) return true
-
         recognizer = SpeechRecognizer.createSpeechRecognizer(this).also { speech ->
             speech.setRecognitionListener(object : RecognitionListener {
-                override fun onReadyForSpeech(params: Bundle?) {
-                    if (isResumed && listeningEnabled) status.text = "गुरी सुन रही है…"
-                }
-
+                override fun onReadyForSpeech(params: Bundle?) { if (isResumed && listeningEnabled) status.text = "गुरी सुन रही है…" }
                 override fun onResults(results: Bundle?) {
-                    val choices = results
-                        ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        .orEmpty()
-                    val phrase = choices.firstOrNull {
-                        val value = it.lowercase(Locale.ROOT)
-                        value.contains("instagram") || value.contains("इंस्टाग्राम") ||
-                            value.contains("reel") || value.contains("रील") ||
-                            value.contains("scroll") || value.contains("स्क्रॉल")
-                    } ?: choices.firstOrNull().orEmpty()
+                    val phrase = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
                     handleVoiceInput(phrase)
                 }
-
                 override fun onError(error: Int) {
                     if (!listeningEnabled || !isResumed || actionRunning) return
-                    if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
-                        status.text = "Microphone permission चालू करें।"
-                    } else {
-                        handler.postDelayed({ startListening() }, 900)
-                    }
+                    if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) status.text = "Microphone permission चालू करें।"
+                    else handler.postDelayed({ startListening() }, 900)
                 }
-
                 override fun onBeginningOfSpeech() {}
                 override fun onBufferReceived(buffer: ByteArray?) {}
                 override fun onEndOfSpeech() {}
@@ -254,13 +168,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun startListening() {
-        if (cloudAgentMode || !listeningEnabled || !isResumed || actionRunning) return
+        if (!listeningEnabled || !isResumed || actionRunning) return
         if (!hasAudioPermission()) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_AUDIO)
             return
         }
         if (!ensureRecognizer()) return
-
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
@@ -269,7 +182,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
             putExtra(RecognizerIntent.EXTRA_PROMPT, "गुरी कहकर अपना आदेश दें")
         }
-
         try {
             recognizer?.startListening(intent)
             status.text = "गुरी सुन रही है…"
@@ -279,27 +191,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun stopListening() {
-        try {
-            recognizer?.cancel()
-        } catch (_: Exception) {
-        }
-    }
+    private fun stopListening() { try { recognizer?.cancel() } catch (_: Exception) {} }
 
     private fun handleVoiceInput(raw: String) {
         if (raw.isBlank()) {
             handler.postDelayed({ startListening() }, 500)
             return
         }
-
-        // The assistant is already in an explicit voice session; wake word is optional.
-        val command = raw
-            .replace(Regex("गुरी|गुरि|गुरू|\\bguri\\b", RegexOption.IGNORE_CASE), "")
-            .replace(",", " ")
-            .replace("，", " ")
-            .trim()
-            .lowercase(Locale.ROOT)
-
+        val command = raw.replace(Regex("गुरी|गुरि|गुरू|\\bguri\\b", RegexOption.IGNORE_CASE), "")
+            .replace(",", " ").trim().lowercase(Locale.ROOT)
         if (command.isBlank()) {
             speakAndListen("हाँ, बोलिए।")
             return
@@ -311,140 +211,67 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         status.text = "समझ गई: $original"
         val hasInstagram = command.contains("instagram") || command.contains("इंस्टाग्राम")
         val asksReels = command.contains("reel") || command.contains("रील")
-        val asksScroll = command.contains("scroll") ||
-            command.contains("स्क्रॉल") ||
-            command.contains("स्क्रोल") ||
-            command.contains("अगली")
-
-        if (hasInstagram) {
-            val launch = packageManager.getLaunchIntentForPackage("com.instagram.android")
-            if (launch == null) {
-                speakAndListen("Instagram इस फोन में install नहीं है।")
-                return
-            }
-            if ((asksReels || asksScroll) && !accessibilityEnabled()) {
-                updateAccessibilityButton()
-                speakAndListen("पहले फोन Control चालू करें। नीचे का बटन दबाकर Guri Accessibility enable करें।")
-                return
-            }
-
-            actionRunning = true
-            lastActionResult = "Instagram खोला गया।"
-            stopListening()
-            status.text = "Instagram खोल रही हूँ…"
-            try {
-                startActivity(launch)
-            } catch (error: Exception) {
-                actionRunning = false
-                speakAndListen("Instagram नहीं खुल पाया। " + (error.localizedMessage ?: ""))
-                return
-            }
-
-            if (asksReels || asksScroll) {
-                attemptOpenReels(command, attempts = 0)
-            } else {
-                actionRunning = false
-                lastActionResult = "Instagram खोल दिया।"
-            }
+        val asksScroll = command.contains("scroll") || command.contains("स्क्रॉल") || command.contains("स्क्रोल") || command.contains("अगली")
+        if (!hasInstagram && !asksReels && !asksScroll) {
+            speakAndListen("अभी यह command उपलब्ध नहीं है। Instagram खोलो और Reels scroll करो बोलकर देखें।")
             return
         }
-
-        if (asksReels && !asksScroll) {
-            val opened = AgentAccessibilityService.instance?.openReelsTab() == true
-            speakAndListen(if (opened) "Reels खोल दिए।" else "Reels का button नहीं मिला। Instagram सामने खोलें।")
+        val launch = packageManager.getLaunchIntentForPackage("com.instagram.android")
+        if (launch == null) {
+            speakAndListen("Instagram इस फोन में install नहीं है।")
             return
         }
-
-        if (asksScroll || asksReels) {
-            val count = extractCount(command).coerceIn(1, 20)
-            val queued = AgentAccessibilityService.instance?.swipeReels(count) == true
-            speakAndListen(
-                if (queued) "$count बार Reels scroll करने का आदेश चला दिया।"
-                else "Instagram Reels अभी सामने नहीं हैं। पहले Instagram खोलें।"
-            )
+        if ((asksReels || asksScroll) && !accessibilityEnabled()) {
+            updateAccessibilityButton()
+            speakAndListen("पहले Phone Control चालू करें। नीचे का button दबाकर Guri Accessibility enable करें।")
             return
         }
-
-        speakAndListen("यह आदेश अभी समझ नहीं आया। Instagram खोलो और Reels scroll करो बोलकर देखें।")
+        actionRunning = true
+        stopListening()
+        status.text = "Instagram खोल रही हूँ…"
+        try {
+            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(launch)
+        } catch (error: Exception) {
+            actionRunning = false
+            speakAndListen("Instagram नहीं खुल पाया। " + (error.localizedMessage ?: ""))
+            return
+        }
+        if (asksReels || asksScroll) attemptOpenReels(command, 0)
+        else {
+            actionRunning = false
+            speakAndListen("Instagram खोल दिया।")
+        }
     }
 
-    private fun attemptOpenReels(
-        command: String,
-        attempts: Int,
-        onComplete: ((String, Boolean) -> Unit)? = null
-    ) {
+    private fun attemptOpenReels(command: String, attempts: Int) {
         handler.postDelayed({
             val opened = AgentAccessibilityService.instance?.openReelsTab() == true
-            if (!opened && attempts < 4) {
+            if (!opened && attempts < 6) {
                 attemptOpenReels(command, attempts + 1)
                 return@postDelayed
             }
-
-            if (opened && (command.contains("scroll") || command.contains("स्क्रॉल") ||
-                    command.contains("स्क्रोल") || command.contains("अगली"))) {
+            if (opened && (command.contains("scroll") || command.contains("स्क्रॉल") || command.contains("स्क्रोल") || command.contains("अगली"))) {
                 handler.postDelayed({
                     val count = extractCount(command).coerceIn(1, 20)
                     val queued = AgentAccessibilityService.instance?.swipeReels(count) == true
-                    lastActionResult = if (queued) {
-                        "Instagram Reels पर $count बार scroll कर दिया।"
-                    } else {
-                        "Reels खुल गए, लेकिन scroll gesture नहीं चला।"
-                    }
-                    actionRunning = false
-                    tts?.speak(lastActionResult, TextToSpeech.QUEUE_FLUSH, null, "guri-action-result")
-                    onComplete?.invoke(lastActionResult, queued)
-                }, 900)
-            } else {
-                lastActionResult = if (opened) "Instagram Reels खोल दिए।"
-                    else "Instagram खुल गया, लेकिन Reels tab नहीं मिला।"
-                actionRunning = false
-                tts?.speak(lastActionResult, TextToSpeech.QUEUE_FLUSH, null, "guri-action-result")
-                onComplete?.invoke(lastActionResult, opened)
-            }
-        }, if (attempts == 0) 1700 else 700)
+                    finishAction(if (queued) "Instagram Reels पर $count बार scroll कर दिया।" else "Reels खुल गए, लेकिन scroll gesture नहीं चला।")
+                }, 1000)
+            } else finishAction(if (opened) "Instagram Reels खोल दिए।" else "Instagram खुल गया, लेकिन Reels tab नहीं मिला।")
+        }, if (attempts == 0) 2200 else 900)
     }
 
-
-    private fun connectCloud() {
-        val serverUrl = cloudUrlInput.text.toString().trim()
-        val code = cloudCodeInput.text.toString().trim()
-        if (serverUrl.isBlank() || code.isBlank()) {
-            cloudStatus.text = "Guri Cloud URL और pairing code भरें।"
-            return
-        }
-
-        getSharedPreferences("guri_cloud", MODE_PRIVATE).edit()
-            .putString("url", serverUrl)
-            .putString("code", code)
-            .apply()
-        cloudAgentMode = true
-        stopListening()
-        micButton.text = "Cloud voice mode"
-        micButton.isEnabled = false
-
-        val service = AgentAccessibilityService.instance
-        if (service == null) {
-            cloudStatus.text = "पहले फोन Control चालू करें और Guri Accessibility enable करें।"
-            return
-        }
-
-        service.setStatusListener { message ->
-            runOnUiThread {
-                cloudStatus.text = message
-                status.text = message
-            }
-        }
-        cloudStatus.text = "Guri Cloud से connect हो रहा है…"
-        service.connectCloud(serverUrl, code)
+    private fun finishAction(message: String) {
+        actionRunning = false
+        status.text = message
+        tts?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "guri-action-result")
+        if (listeningEnabled) handler.postDelayed({ startListening() }, 1800)
     }
 
     private fun extractCount(command: String): Int {
         Regex("\\d+").find(command)?.value?.toIntOrNull()?.let { return it }
-        val hindiNumbers = mapOf(
-            "एक" to 1, "दो" to 2, "तीन" to 3, "चार" to 4, "पांच" to 5, "पाँच" to 5,
-            "छह" to 6, "छः" to 6, "सात" to 7, "आठ" to 8, "नौ" to 9, "दस" to 10
-        )
-        return hindiNumbers.entries.firstOrNull { command.contains(it.key) }?.value ?: 3
+        val numbers = mapOf("एक" to 1, "दो" to 2, "तीन" to 3, "चार" to 4, "पांच" to 5, "पाँच" to 5, "छह" to 6, "छः" to 6, "सात" to 7, "आठ" to 8, "नौ" to 9, "दस" to 10)
+        return numbers.entries.firstOrNull { command.contains(it.key) }?.value ?: 3
     }
 
     private fun speakAndListen(message: String) {
@@ -453,22 +280,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if (listeningEnabled) handler.postDelayed({ startListening() }, 1800)
     }
 
-    override fun onInit(statusCode: Int) {
-        if (statusCode == TextToSpeech.SUCCESS) {
-            tts?.language = Locale("hi", "IN")
-        }
-    }
+    override fun onInit(statusCode: Int) { if (statusCode == TextToSpeech.SUCCESS) tts?.language = Locale("hi", "IN") }
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         recognizer?.destroy()
         recognizer = null
-        AgentAccessibilityService.instance?.setStatusListener(null)
         tts?.shutdown()
         super.onDestroy()
     }
 
-    companion object {
-        private const val REQUEST_AUDIO = 42
-    }
+    companion object { private const val REQUEST_AUDIO = 42 }
 }
