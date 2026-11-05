@@ -70,7 +70,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setOnClickListener {
                 listeningEnabled = !listeningEnabled
                 if (listeningEnabled) {
-                    startBackgroundVoiceService(GuriBackgroundVoiceService.ACTION_LISTEN)
                     startListening()
                     text = "माइक बंद करें"
                 } else {
@@ -117,7 +116,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     override fun onPause() {
         isResumed = false
         stopListening()
-        startBackgroundVoiceService(GuriBackgroundVoiceService.ACTION_LISTEN)
+        // The microphone foreground service was created while this Activity was visible.
+        // Reuse that running service instead of starting a microphone FGS from background.
+        try {
+            startService(Intent(this, GuriBackgroundVoiceService::class.java).setAction(GuriBackgroundVoiceService.ACTION_LISTEN))
+        } catch (_: Exception) { }
         super.onPause()
     }
 
