@@ -330,13 +330,19 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         }
                         handler.postDelayed({
                             val drafted = service.typeMessageIntoComposer(message)
-                            finishAction(if (drafted) "$recipient की Instagram chat में '$message' लिख दिया है। भेजने के लिए बोलें: Send message।"
-                                else "Instagram chat खुली, लेकिन message box नहीं मिला।")
+                            if (drafted) {
+                                pendingMessageReady = true
+                                pendingMessagePackage = packageName
+                                finishAction("$recipient की Instagram chat में '$message' लिखा है। भेजने के लिए बोलें: हाँ भेज दो।")
+                            } else finishAction("Instagram chat खुली, लेकिन message box नहीं मिला।")
                         }, 900)
                     } else {
                         val drafted = service.typeMessageIntoComposer(message)
-                        finishAction(if (drafted) "$recipient की WhatsApp chat में '$message' लिख दिया है। भेजने के लिए बोलें: Send message।"
-                            else "WhatsApp chat खुली, लेकिन message box नहीं मिला।")
+                        if (drafted) {
+                            pendingMessageReady = true
+                            pendingMessagePackage = packageName
+                            finishAction("$recipient की WhatsApp chat में '$message' लिखा है। भेजने के लिए बोलें: हाँ भेज दो।")
+                        } else finishAction("WhatsApp chat खुली, लेकिन message box नहीं मिला।")
                     }
                 }, 1000)
             }, 1400)
