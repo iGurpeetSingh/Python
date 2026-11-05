@@ -140,6 +140,28 @@ async def adb(*args):
     return out.decode(errors="replace").strip()
 
 
+async def capture_phone_screen():
+    """Capture one phone screenshot in memory; never persist or upload it."""
+    process = await asyncio.create_subprocess_exec(
+        adb_path(),
+        "exec-out", "screencap", "-p",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    image, error = await process.communicate()
+    if process.returncode != 0 or not image.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+        detail = error.decode(errors="replace").strip()
+        raise HTTPException(503, detail or "Could not capture the Android screen.")
+    return {"bytes": len(image), "png": True}
+
+
+async def instagram_is_foreground():
+    output = await adb("shell", "dumpsys", "activity", "activities")
+    return "com.instagram.android" in output and (
+        "mResumedActivity" in output or "topResumedActivity" in output
+    )
+
+
 async def phone():
     output = await adb("devices")
     devices = [
@@ -161,7 +183,12 @@ async def instagram_open():
         "shell", "monkey", "-p", "com.instagram.android",
         "-c", "android.intent.category.LAUNCHER", "1",
     )
-    return "Instagram launch command sent to the connected Android phone."
+    for _ in range(12):
+        await asyncio.sleep(0.5)
+        if await instagram_is_foreground():
+            await capture_phone_screen()
+            return "Instagram opened on the connected phone; screen capture verified."
+    raise HTTPException(504, "Instagram launch was sent, but Android did not report Instagram in the foreground.")
 
 
 async def _tap_instagram_reels_tab():
@@ -229,7 +256,9 @@ async def reels_scroll(count):
 
 async def instagram_reels_scroll(count):
     await instagram_open()
-    await asyncio.sleep(2.0)
+    await asyncio.sleep(1.0)
+    # Capture the actual display and inspect Android's accessibility/UIAutomator tree.
+    await capture_phone_screen()
     if not await _tap_instagram_reels_tab():
         return {
             "reply": (
