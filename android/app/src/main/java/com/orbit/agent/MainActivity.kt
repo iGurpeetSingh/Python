@@ -334,6 +334,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun extractRecipient(command: String, appName: String): String? {
+        val personalName = Regex("(?:मेरी|मेरा|मेरे|my)\\s+([\\p{L}][\\p{L} .'-]{1,28}?)\\s+(?:के नाम|का नाम|की प्रोफाइल|की profile)", RegexOption.IGNORE_CASE)
+            .find(command)?.groupValues?.getOrNull(1)?.trim()
+        if (!personalName.isNullOrBlank()) return personalName
+
+        val namedContact = Regex("(?:दोस्त|फ्रेंड|friend|contact|chat|profile|प्रोफाइल)\\s+(?:का नाम\\s+)?([\\p{L}][\\p{L} .'-]{1,28})", RegexOption.IGNORE_CASE)
+            .find(command)?.groupValues?.getOrNull(1)?.trim()
+        if (!namedContact.isNullOrBlank()) return namedContact
+
         var cleaned = command
             .replace(Regex("whatsapp|व्हाट्सएप|instagram|इंस्टाग्राम|facebook|फेसबुक", RegexOption.IGNORE_CASE), " ")
             .replace(Regex("खोलो|ओपन करो|open|जाओ|जाके|जाकर|उस पर|उसपे|मेरी|मेरा|मेरे|खुद की|प्रोफाइल है|profile है|फ्रेंड है|friend है|मैसेज करो|message करो|मैसेज लिखो|message लिखो|hi लिखो|हाय लिखो|लिखो|भेजो|करो", RegexOption.IGNORE_CASE), " ")
