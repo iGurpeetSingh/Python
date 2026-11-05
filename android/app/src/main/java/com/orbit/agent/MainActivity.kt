@@ -209,10 +209,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun runCommand(command: String, original: String) {
         status.text = "समझ गई: $original"
-        val service = AgentAccessibilityService.instance
         val app = resolveTargetApp(command)
         if (app == null) {
-            speakAndListen("यह ऐप अभी पहचाना नहीं गया। Instagram, WhatsApp, Facebook, Free Fire या PUBG Mobile बोलें।")
+            speakAndListen("कौन सा ऐप खोलना है? WhatsApp, Instagram या Facebook बोलें।")
             return
         }
         if (!accessibilityEnabled()) {
@@ -225,6 +224,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             speakAndListen(app.first + " इस फोन में install नहीं है।")
             return
         }
+
+        val recipient = extractRecipient(command, app.first)
+        val message = extractMessage(command)
+        val wantsScroll = command.contains("scroll") || command.contains("स्क्रॉल") ||
+            command.contains("स्क्रोल") || command.contains("अगली") || command.contains("रील")
+
         actionRunning = true
         stopListening()
         status.text = app.first + " खोल रही हूँ…"
@@ -236,10 +241,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             return
         }
 
-        val searchText = extractSearchText(command)
-        val wantsHi = command.contains("hi") || command.contains("हाय") || command.contains("हाई")
-        val wantsScroll = command.contains("scroll") || command.contains("स्क्रॉल") ||
-            command.contains("स्क्रोल") || command.contains("अगली") || command.contains("रील")
         handler.postDelayed({
             val activeService = AgentAccessibilityService.instance
             if (activeService == null) {
@@ -248,55 +249,111 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
             when {
                 wantsScroll && app.first == "Instagram" -> {
-                    val opened = activeService.openReelsTab()
-                    if (!opened) finishAction("Instagram खुला, लेकिन Reels tab नहीं मिला।")
-                    else {
-                        val count = extractCount(command).coerceIn(1, 20)
-                        val accepted = activeService.swipeReels(count) { done ->
-                            handler.post { finishAction(if (done) "Instagram Reels पर $count swipe पूरे हुए।" else "Swipe पूरा नहीं हुआ।") }
-                        }
-                        if (!accepted) finishAction("Reels पर swipe शुरू नहीं हुआ।")
+                    if (!activeService.isPackageForeground(app.second)) {
+                        finishAction("Instagram अभी foreground में नहीं आया।")
+                        return@postDelayed
                     }
+                    val opened = activeService.openReelsTab()
+                    if (!opened) {
+                        finishAction("Instagram खुला, लेकिन Reels tab नहीं मिला।")
+                        return@postDelayed
+                    }
+                    val count = extractCount(command).coerceIn(1, 20)
+                    val accepted = activeService.swipeReels(count) { done ->
+                        handler.post { finishAction(if (done) "Instagram Reels पर $count swipe पूरे हुए।" else "Swipe पूरा नहीं हुआ।") }
+                    }
+                    if (!accepted) finishAction("Reels पर swipe शुरू नहीं हुआ।")
                 }
-                !searchText.isNullOrBlank() -> {
-                    val clickedSearch = activeService.clickVisibleLabel("search", "खोजें", "खोज")
-                    handler.postDelayed({
-                        val typed = activeService.typeIntoFocusedOrFirstField(searchText)
-                        if (typed) {
-                            status.text = app.first + " में '$searchText' खोज रही हूँ…"
-                            handler.postDelayed({
-                                val resultOpened = activeService.clickVisibleLabel(searchText)
-                                if (!resultOpened) {
-                                    finishAction(app.first + " में '$searchText' search किया, लेकिन matching result accessibility में नहीं मिला।")
-                                } else if (wantsHi) {
-                                    handler.postDelayed({
-                                        val messageAction = activeService.clickVisibleLabel("message", "संदेश", "chat", "मैसेज")
-                                        handler.postDelayed({
-                                            val drafted = activeService.typeIntoFocusedOrFirstField("Hi")
-                                            finishAction(
-                                                if (drafted) "Profile या chat खुली और Hi message field में लिखा है। भेजने से पहले जाँच लें।"
-                                                else if (messageAction) "Chat खुली, लेकिन message field नहीं मिली।"
-                                                else "Search result खुला, लेकिन Message button नहीं मिला।"
-                                            )
-                                        }, 900)
-                                    }, 900)
-                                } else {
-                                    finishAction(app.first + " में '$searchText' वाला result खोला।")
-                                }
-                            }, 1400)
-                        } else {
-                            finishAction(app.first + " खुला, लेकिन Search field नहीं मिला। Search icon दबाकर फिर बोलें: '$searchText लिखो'।")
-                        }
-                    }, if (clickedSearch) 700 else 450)
+                !recipient.isNullOrBlank() && (app.first == "WhatsApp" || app.first == "Instagram") -> {
+                    runContactWorkflow(activeService, app.first, app.second, recipient, message)
                 }
-                wantsHi -> {
-                    val typed = activeService.typeIntoFocusedOrFirstField("Hi")
-                    finishAction(if (typed) app.first + " में Hi message box में लिखा है। भेजने से पहले खुद जाँच लें।"
-                        else app.first + " खुला, लेकिन message field नहीं मिला। पहले chat खोलें।")
-                }
-                else -> finishAction(app.first + " खोल दिया।")
+                else -> finishAction(app.first + " खोल दिया।" +
+                    if (recipient.isNullOrBlank()) "" else " Contact '$recipient' command से स्पष्ट नहीं मिला।")
             }
-        }, 1800)
+        }, 1600)
+    }
+
+    private fun runContactWorkflow(
+        service: AgentAccessibilityService,
+        appName: String,
+        packageName: String,
+        recipient: String,
+        message: String
+    ) {
+        if (!service.isPackageForeground(packageName)) {
+            finishAction("$appName खुला, लेकिन अभी स्क्रीन active नहीं है।")
+            return
+        }
+        status.text = "$appName में $recipient खोज रही हूँ…"
+        val searchClicked = service.clickVisibleLabel(
+            "search", "खोजें", "खोज", "Search", "Search chats", "Search people"
+        )
+        handler.postDelayed({
+            if (!service.isPackageForeground(packageName)) {
+                finishAction("$appName की स्क्रीन बदल गई; कार्रवाई रोक दी।")
+                return@postDelayed
+            }
+            val typed = service.typeIntoSearchField(recipient)
+            if (!typed) {
+                finishAction("$appName में Search field नहीं मिली। Search icon खोलकर दोबारा बोलें।")
+                return@postDelayed
+            }
+            handler.postDelayed({
+                val opened = service.clickVisibleLabel(recipient)
+                if (!opened) {
+                    finishAction("$appName में '$recipient' का matching result नहीं मिला।")
+                    return@postDelayed
+                }
+                handler.postDelayed({
+                    if (appName == "Instagram") {
+                        val messageButton = service.clickVisibleLabel("message", "संदेश", "मैसेज")
+                        if (!messageButton) {
+                            finishAction("Instagram profile खुली, लेकिन Message button नहीं मिला।")
+                            return@postDelayed
+                        }
+                        handler.postDelayed({
+                            val drafted = service.typeMessageIntoComposer(message)
+                            finishAction(if (drafted) "$recipient की Instagram chat में '$message' लिख दिया है। भेजने के लिए बोलें: Send message।"
+                                else "Instagram chat खुली, लेकिन message box नहीं मिला।")
+                        }, 900)
+                    } else {
+                        val drafted = service.typeMessageIntoComposer(message)
+                        finishAction(if (drafted) "$recipient की WhatsApp chat में '$message' लिख दिया है। भेजने के लिए बोलें: Send message।"
+                            else "WhatsApp chat खुली, लेकिन message box नहीं मिला।")
+                    }
+                }, 1000)
+            }, 1400)
+        }, if (searchClicked) 700 else 1100)
+    }
+
+    private fun extractMessage(command: String): String {
+        val match = Regex("(?:message|मैसेज|संदेश)\\s+(?:लिखो|लिखना|करो|भेजो)?\\s*(hi|hello|हाय|हेलो|नमस्ते)", RegexOption.IGNORE_CASE)
+            .find(command)
+        if (match != null) return match.groupValues[1]
+        return if (command.contains("hello") || command.contains("हेलो")) "Hello" else "Hi"
+    }
+
+    private fun extractRecipient(command: String, appName: String): String? {
+        var cleaned = command
+            .replace(Regex("whatsapp|व्हाट्सएप|instagram|इंस्टाग्राम|facebook|फेसबुक", RegexOption.IGNORE_CASE), " ")
+            .replace(Regex("खोलो|ओपन करो|open|जाओ|जाके|जाकर|उस पर|उसपे|मेरी|मेरा|मेरे|खुद की|प्रोफाइल है|profile है|फ्रेंड है|friend है|मैसेज करो|message करो|मैसेज लिखो|message लिखो|hi लिखो|हाय लिखो|लिखो|भेजो|करो", RegexOption.IGNORE_CASE), " ")
+            .replace(Regex("\\s+"), " ").trim()
+        val patterns = listOf(
+            Regex("(?:नाम से|contact|chat|profile)\\s+([\\p{L}][\\p{L} .'-]{1,35})", RegexOption.IGNORE_CASE),
+            Regex("(?:पर|पे)\\s+([\\p{L}][\\p{L} .'-]{1,35})", RegexOption.IGNORE_CASE),
+            Regex("([\\p{L}][\\p{L} .'-]{1,35}?)\\s+(?:पर|पे)\\b", RegexOption.IGNORE_CASE)
+        )
+        for (pattern in patterns) {
+            val found = pattern.find(cleaned)?.groupValues?.getOrNull(1)?.trim()
+            if (!found.isNullOrBlank()) {
+                val candidate = found.replace(Regex("^(मेरी|मेरा|मेरे|खुद की)\\s+", ""), "").trim()
+                if (candidate.length >= 2 && !candidate.equals(appName, true)) return candidate
+            }
+        }
+        // A plain "search <name>" command is also accepted.
+        val search = Regex("(?:search|सर्च|खोजो)\\s+([\\p{L}][\\p{L} .'-]{1,35})", RegexOption.IGNORE_CASE)
+            .find(cleaned)?.groupValues?.getOrNull(1)?.trim()
+        return search?.takeIf { it.length >= 2 }
     }
 
     private fun resolveTargetApp(command: String): Pair<String, String>? {
@@ -316,7 +373,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             Triple("बीजीएमआई", "BGMI", "com.pubg.imobile"),
             Triple("पबजी", "PUBG Mobile", "com.tencent.ig")
         )
-        val found = apps.firstOrNull { command.contains(it.first) } ?: return null
+        val found = apps.mapNotNull { alias ->
+            val index = command.indexOf(alias.first, ignoreCase = true)
+            if (index >= 0) Triple(index, alias.second, alias.third) else null
+        }.minByOrNull { it.first } ?: return null
         return found.second to found.third
     }
 
