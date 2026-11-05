@@ -226,6 +226,26 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             finishAction(if (sent) "Send button दबा दिया।" else "Send button नहीं मिला; message draft में सुरक्षित है।")
             return
         }
+        // A reel-navigation command without an app name acts only on the
+        // Instagram screen that is already in the foreground.
+        val asksNextReel = isNextReelCommand(command)
+        if (asksNextReel && resolveTargetApp(command) == null) {
+            val service = AgentAccessibilityService.instance
+            if (service == null || !service.isInstagramForeground()) {
+                speakAndListen("अगली Reel चलाने के लिए पहले Instagram में Reel खोलें।")
+                return
+            }
+            actionRunning = true
+            stopListening()
+            val accepted = service.swipeReels(1) { completed ->
+                handler.post {
+                    finishAction(if (completed) "अगली Reel पर एक swipe कर दिया।" else "Swipe पूरा नहीं हुआ।")
+                }
+            }
+            if (!accepted) finishAction("Instagram पर swipe शुरू नहीं हुआ।")
+            return
+        }
+
         val app = resolveTargetApp(command)
         if (app == null) {
             speakAndListen("कौन सा ऐप खोलना है? WhatsApp, Instagram या Facebook बोलें।")
@@ -244,18 +264,21 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         val recipient = extractRecipient(command, app.first)
         val message = extractMessage(command)
-        val wantsScroll = command.contains("scroll") || command.contains("स्क्रॉल") ||
-            command.contains("स्क्रोल") || command.contains("अगली") || command.contains("रील")
+        val wantsScroll = isNextReelCommand(command)
 
         actionRunning = true
         stopListening()
         status.text = app.first + " खोल रही हूँ…"
-        try {
-            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            startActivity(launch)
-        } catch (error: Exception) {
-            finishAction(app.first + " नहीं खुल पाया: " + (error.localizedMessage ?: ""))
-            return
+        val instagramAlreadyForeground = app.first == "Instagram" &&
+            AgentAccessibilityService.instance?.isInstagramForeground() == true
+        if (!instagramAlreadyForeground) {
+            try {
+                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(launch)
+            } catch (error: Exception) {
+                finishAction(app.first + " नहीं खुल पाया: " + (error.localizedMessage ?: ""))
+                return
+            }
         }
 
         handler.postDelayed({
@@ -270,14 +293,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         finishAction("Instagram अभी foreground में नहीं आया।")
                         return@postDelayed
                     }
-                    val opened = activeService.openReelsTab()
+                    val opened = if (instagramAlreadyForeground) true else activeService.openReelsTab()
                     if (!opened) {
                         finishAction("Instagram खुला, लेकिन Reels tab नहीं मिला।")
                         return@postDelayed
                     }
-                    val count = extractCount(command).coerceIn(1, 20)
+                    // Manual mode: one spoken command always means exactly one swipe.
+                    val count = 1
                     val accepted = activeService.swipeReels(count) { done ->
-                        handler.post { finishAction(if (done) "Instagram Reels पर $count swipe पूरे हुए।" else "Swipe पूरा नहीं हुआ।") }
+                        handler.post { finishAction(if (done) "अगली Reel पर एक swipe कर दिया।" else "Swipe पूरा नहीं हुआ।") }
                     }
                     if (!accepted) finishAction("Reels पर swipe शुरू नहीं हुआ।")
                 }
@@ -385,6 +409,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val search = Regex("(?:search|सर्च|खोजो)\\s+([\\p{L}][\\p{L} .'-]{1,35})", RegexOption.IGNORE_CASE)
             .find(cleaned)?.groupValues?.getOrNull(1)?.trim()
         return search?.takeIf { it.length >= 2 }
+    }
+
+    private fun isNextReelCommand(command: String): Boolean {
+        val normalized = command.lowercase(Locale.ROOT)
+        return listOf(
+            "अगली", "फिर स्क्रॉल", "फिर स्क्रोल", "स्क्रॉल करो", "स्क्रोल करो",
+            "रील स्क्रॉल", "रील स्क्रोल", "ऊपर करो", "next reel", "scroll up",
+            "swipe up", "scroll"
+        ).any { normalized.contains(it) }
     }
 
     private fun resolveTargetApp(command: String): Pair<String, String>? {
