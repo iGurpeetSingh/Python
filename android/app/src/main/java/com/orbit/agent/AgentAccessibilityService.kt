@@ -256,6 +256,96 @@ class AgentAccessibilityService : AccessibilityService() {
         return true
     }
 
+
+    /** Opens a visible app by package name. */
+    fun launchInstalledApp(packageName: String): Boolean {
+        val launch = packageManager.getLaunchIntentForPackage(packageName) ?: return false
+        return try {
+            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(launch)
+            true
+        } catch (_: Exception) { false }
+    }
+
+    /** Types into the first visible editable field, optionally opening an app's Search tab first. */
+    fun typeIntoFocusedOrFirstField(value: String): Boolean {
+        val root = rootInActiveWindow ?: return false
+        val candidates = mutableListOf<AccessibilityNodeInfo>()
+        collectEditableNodes(root, candidates, 0)
+        root.recycle()
+        val target = candidates.firstOrNull { it.isVisibleToUser && it.isEnabled }
+        candidates.drop(1).forEach { it.recycle() }
+        if (target == null) return false
+        val args = android.os.Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value)
+        }
+        val ok = target.performAction(AccessibilityNodeInfo.ACTION_FOCUS) &&
+            target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        target.recycle()
+        return ok
+    }
+
+    private fun collectEditableNodes(node: AccessibilityNodeInfo, out: MutableList<AccessibilityNodeInfo>, depth: Int) {
+        if (depth > 20) return
+        if (node.isEditable || node.className?.toString()?.contains("EditText", true) == true) {
+            out.add(AccessibilityNodeInfo.obtain(node))
+        }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            collectEditableNodes(child, out, depth + 1)
+            child.recycle()
+        }
+    }
+
+    /** Clicks a visible node whose text or content description matches a label. */
+    fun clickVisibleLabel(vararg labels: String): Boolean {
+        val root = rootInActiveWindow ?: return false
+        val wanted = labels.map { it.lowercase(Locale.ROOT) }
+        val nodes = mutableListOf<AccessibilityNodeInfo>()
+        collectLabelNodes(root, nodes, wanted, 0)
+        root.recycle()
+        val ordered = nodes.sortedByDescending { it.isClickable }
+        var result = false
+        for (node in ordered) {
+            if (!result && node.isVisibleToUser) result = clickNode(node)
+            node.recycle()
+        }
+        return result
+    }
+
+    private fun collectLabelNodes(
+        node: AccessibilityNodeInfo,
+        out: MutableList<AccessibilityNodeInfo>,
+        labels: List<String>,
+        depth: Int
+    ) {
+        if (depth > 20) return
+        val text = node.text?.toString()?.lowercase(Locale.ROOT).orEmpty()
+        val desc = node.contentDescription?.toString()?.lowercase(Locale.ROOT).orEmpty()
+        if (labels.any { it.isNotBlank() && (text == it || desc == it || text.contains(it) || desc.contains(it)) }) {
+            out.add(AccessibilityNodeInfo.obtain(node))
+        }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            collectLabelNodes(child, out, labels, depth + 1)
+            child.recycle()
+        }
+    }
+
+    fun performVerticalSwipe(up: Boolean = true): Boolean {
+        val metrics = resources.displayMetrics
+        val x = metrics.widthPixels / 2f
+        val fromY = if (up) metrics.heightPixels * .82f else metrics.heightPixels * .25f
+        val toY = if (up) metrics.heightPixels * .25f else metrics.heightPixels * .82f
+        val path = Path().apply { moveTo(x, fromY); lineTo(x, toY) }
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0, 420)).build()
+        return dispatchGesture(gesture, null, handler)
+    }
+
+    fun pressBack(): Boolean = performGlobalAction(GLOBAL_ACTION_BACK)
+    fun pressHome(): Boolean = performGlobalAction(GLOBAL_ACTION_HOME)
+
     private fun handleCloudCommand(requestId: String, rawCommand: String) {
         val command = rawCommand.lowercase(Locale.ROOT)
         val hasInstagram = command.contains("instagram") || command.contains("इंस्टाग्राम")
