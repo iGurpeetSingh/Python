@@ -30,6 +30,7 @@ export default function App() {
   const [heard, setHeard] = useState("");
   const [reply, setReply] = useState("माइक दबाएँ और अपना काम बोलें।");
   const [apiReady, setApiReady] = useState(false);
+  const [phoneStatus, setPhoneStatus] = useState("USB phone not checked");
   const [events, setEvents] = useState([]);
   const recognitionRef = useRef(null);
   const listeningRef = useRef(false);
@@ -43,9 +44,22 @@ export default function App() {
   const checkRuntime = useCallback(async () => {
     try {
       const data = await readApi(await fetch(API_URL("/api/health"), { cache: "no-store" }));
-      setApiReady(Boolean(data.ok && data.agent === "Guri"));
-      setStatus(data.ok ? "Guri तैयार है — आपका PC connected है" : "Guri runtime उपलब्ध नहीं है");
-      return Boolean(data.ok);
+      const ready = Boolean(data.ok && data.agent === "Guri");
+      setApiReady(ready);
+      if (ready) {
+        try {
+          const phoneResponse = await fetch(API_URL("/api/mobile/devices"), { cache: "no-store" });
+          const phoneData = await readApi(phoneResponse);
+          const devices = phoneData.devices || [];
+          setPhoneStatus(devices.length ? "Android USB connected" : "Phone connect करें और USB debugging allow करें");
+        } catch {
+          setPhoneStatus("Android Platform Tools / USB connection जाँचें");
+        }
+        setStatus("Guri तैयार है — आपका PC connected है");
+      } else {
+        setStatus("Guri runtime उपलब्ध नहीं है");
+      }
+      return ready;
     } catch (error) {
       setApiReady(false);
       setStatus(error.message || "Guri backend चालू नहीं है");
@@ -206,7 +220,7 @@ export default function App() {
       <section className="guri-runtime">
         <div className="runtime-heading"><Terminal size={16}/> GURI LOCAL RUNTIME <span className={apiReady ? "runtime-online" : "runtime-offline"}><Wifi size={13}/> {apiReady ? "Connected" : "Offline"}</span></div>
         <p><Monitor size={14}/> Windows automation runtime</p>
-        <p><Smartphone size={14}/> Android phone actions: connected device / companion required</p>
+        <p><Smartphone size={14}/> Android phone: {phoneStatus}</p>
         {!apiReady && <div className="runtime-help">Windows पर <b>Start-Guri.bat</b> पर double-click करें। Guri backend और voice screen अपने आप start होंगे।</div>}
       </section>
       {heard && <section className="guri-message"><small>आपने कहा</small><p>{heard}</p></section>}
