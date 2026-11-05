@@ -128,8 +128,8 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
             .replace("गुरि", "गुरी").replace("गुरू", "गुरी")
         val hasWakeWord = normalized.contains("गुरी") || normalized.contains("guri")
         val asksNext = listOf("अगली", "अगला", "फिर स्क्रॉल", "फिर स्क्रोल", "रील स्क्रॉल",
-            "रील स्क्रोल", "रील स्क्रॉल करो", "रील स्क्रोल करो", "स्क्रॉल करो",
-            "स्क्रोल करो", "next reel", "scroll up", "swipe up", "reel scroll")
+            "रील स्क्रोल", "रील स्क्रॉल करो", "रील स्क्रोल करो", "री स्क्रॉल", "री स्क्रोल",
+            "रीस्क्रॉल", "रीस्क्रोल", "स्क्रॉल करो", "स्क्रोल करो", "स्क्रॉल", "स्क्रोल", "next reel", "scroll up", "swipe up", "reel scroll")
             .any { normalized.contains(it) }
         if (!hasWakeWord || !asksNext) {
             handler.postDelayed({ startRecognition() }, 350)
