@@ -292,6 +292,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             Triple("फ्री फायर", "Free Fire", "com.dts.freefireth"),
             Triple("pubg", "PUBG Mobile", "com.tencent.ig"),
             Triple("pubg mobile", "PUBG Mobile", "com.tencent.ig"),
+            Triple("bgmi", "BGMI", "com.pubg.imobile"),
+            Triple("बीजीएमआई", "BGMI", "com.pubg.imobile"),
             Triple("पबजी", "PUBG Mobile", "com.tencent.ig")
         )
         val found = apps.firstOrNull { command.contains(it.first) } ?: return null
@@ -300,7 +302,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun extractSearchText(command: String): String? {
         val patterns = listOf(
-            Regex("(?:search|सर्च|खोजो|खोजें|ढूंढो|ढूँढो)\\s+(.+?)(?:\\s+(?:और|फिर|then|लिखो|लिखना|open|खोलो).*)?$", RegexOption.IGNORE_CASE),
+            Regex("(?:search\\s+करो|सर्च\\s+करो|खोजो|खोजें|ढूंढो|ढूँढो|search|सर्च)\\s+(.+?)(?:\\s+(?:और|फिर|then|लिखो|लिखना|open|खोलो).*)?$", RegexOption.IGNORE_CASE),
             Regex("(?:में|पर)\\s+(.+?)\\s+(?:सर्च|search|खोजो)", RegexOption.IGNORE_CASE)
         )
         for (pattern in patterns) {
