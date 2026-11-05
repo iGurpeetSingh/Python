@@ -377,7 +377,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         for (pattern in patterns) {
             val found = pattern.find(cleaned)?.groupValues?.getOrNull(1)?.trim()
             if (!found.isNullOrBlank()) {
-                val candidate = found.replace(Regex("^(मेरी|मेरा|मेरे|खुद की)\\s+", ""), "").trim()
+                val candidate = found.replace(Regex("^(मेरी|मेरा|मेरे|खुद की)\\s+"), "").trim()
                 if (candidate.length >= 2 && !candidate.equals(appName, true)) return candidate
             }
         }
