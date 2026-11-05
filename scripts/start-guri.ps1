@@ -45,6 +45,38 @@ function Write-StartupLog([string]$Message) {
     Add-Content -Path (Join-Path $env:TEMP "guri-startup.log") -Value "$(Get-Date -Format o) $Message"
 }
 
+function Ensure-Adb {
+    if (Get-Command adb -ErrorAction SilentlyContinue) { return $true }
+
+    $toolsRoot = Join-Path (Split-Path -Parent $PSScriptRoot) ".tools"
+    $platformTools = Join-Path $toolsRoot "platform-tools"
+    $adbExe = Join-Path $platformTools "adb.exe"
+    if (-not (Test-Path $adbExe)) {
+        New-Item -ItemType Directory -Force -Path $toolsRoot | Out-Null
+        $zip = Join-Path $env:TEMP "guri-platform-tools.zip"
+        $extract = Join-Path $env:TEMP "guri-platform-tools-extract"
+        try {
+            Write-Host "Installing Android Platform Tools for automatic phone control..." -ForegroundColor Cyan
+            Invoke-WebRequest -Uri "https://dl.google.com/android/repository/platform-tools-latest-windows.zip" -OutFile $zip -UseBasicParsing
+            if (Test-Path $extract) { Remove-Item $extract -Recurse -Force }
+            Expand-Archive -Path $zip -DestinationPath $extract -Force
+            Copy-Item (Join-Path $extract "platform-tools") $toolsRoot -Recurse -Force
+        } catch {
+            Write-StartupLog ("ADB auto-install warning: " + $_.Exception.Message)
+            return $false
+        } finally {
+            Remove-Item $zip -Force -ErrorAction SilentlyContinue
+            Remove-Item $extract -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    if (Test-Path $adbExe) {
+        $env:PATH = "$platformTools;$env:PATH"
+        return $true
+    }
+    return $false
+}
+
 $backendError = Join-Path $env:TEMP "guri-backend-error.log"
 $frontendError = Join-Path $env:TEMP "guri-frontend-error.log"
 
@@ -59,6 +91,12 @@ try {
     }
     if (-not (Get-Command node -ErrorAction SilentlyContinue) -or -not (Get-Command npm -ErrorAction SilentlyContinue)) {
         throw "Node.js LTS is missing or not in PATH. Install Node.js LTS once, then run Start-Guri.bat again."
+    }
+
+    if (Ensure-Adb) {
+        Write-StartupLog "Android Platform Tools available."
+    } else {
+        Write-StartupLog "Android Platform Tools unavailable; Windows-only commands remain available."
     }
     if (-not (Test-Path $venvPython)) {
         if ($NoInstall) { throw "Python environment not installed yet. Run Start-Guri.bat once before enabling auto-start." }
