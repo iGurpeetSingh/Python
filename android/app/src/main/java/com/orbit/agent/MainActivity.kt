@@ -70,10 +70,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setOnClickListener {
                 listeningEnabled = !listeningEnabled
                 if (listeningEnabled) {
+                    startBackgroundVoiceService(GuriBackgroundVoiceService.ACTION_LISTEN)
                     startListening()
                     text = "माइक बंद करें"
                 } else {
                     stopListening()
+                    startBackgroundVoiceService(GuriBackgroundVoiceService.ACTION_STOP)
                     text = "माइक चालू करें"
                     status.text = "गुरी pause है"
                 }
@@ -97,6 +99,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         layout.addView(accessibilityButton)
         layout.addView(help)
         setContentView(layout)
+        startBackgroundVoiceService(GuriBackgroundVoiceService.ACTION_PAUSE)
         updateAccessibilityButton()
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_AUDIO)
@@ -106,6 +109,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     override fun onResume() {
         super.onResume()
         isResumed = true
+        startBackgroundVoiceService(GuriBackgroundVoiceService.ACTION_PAUSE)
         updateAccessibilityButton()
         if (listeningEnabled && hasAudioPermission()) handler.postDelayed({ startListening() }, 650)
     }
@@ -113,7 +117,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     override fun onPause() {
         isResumed = false
         stopListening()
+        startBackgroundVoiceService(GuriBackgroundVoiceService.ACTION_LISTEN)
         super.onPause()
+    }
+
+    private fun startBackgroundVoiceService(action: String) {
+        if (!listeningEnabled && action != GuriBackgroundVoiceService.ACTION_STOP) return
+        val intent = Intent(this, GuriBackgroundVoiceService::class.java).setAction(action)
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
+        } catch (_: Exception) { /* Foreground activity listener remains available. */ }
     }
 
     private fun hasAudioPermission() =
