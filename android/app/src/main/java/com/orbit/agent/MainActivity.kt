@@ -122,6 +122,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun startBackgroundVoiceService(action: String) {
+        if (!hasAudioPermission() && action != GuriBackgroundVoiceService.ACTION_STOP) return
         if (!listeningEnabled && action != GuriBackgroundVoiceService.ACTION_STOP) return
         val intent = Intent(this, GuriBackgroundVoiceService::class.java).setAction(action)
         try {
@@ -148,6 +149,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if (requestCode == REQUEST_AUDIO) {
             if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
                 listeningEnabled = true
+                startBackgroundVoiceService(GuriBackgroundVoiceService.ACTION_PAUSE)
                 handler.postDelayed({ startListening() }, 500)
             } else status.text = "Voice चलाने के लिए Microphone permission जरूरी है।"
         }
