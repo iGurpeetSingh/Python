@@ -28,6 +28,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var listeningEnabled = true
     private var isResumed = false
     private var actionRunning = false
+    private var pendingMessageReady = false
+    private var pendingMessagePackage = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -209,6 +211,21 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun runCommand(command: String, original: String) {
         status.text = "समझ गई: $original"
+        if (pendingMessageReady && (command.contains("भेज") || command.contains("send") || command.contains("हाँ") || command.contains("हां"))) {
+            val service = AgentAccessibilityService.instance
+            if (service == null || !service.isPackageForeground(pendingMessagePackage)) {
+                pendingMessageReady = false
+                finishAction("Message वाली chat अब active नहीं है। दोबारा command दें।")
+                return
+            }
+            actionRunning = true
+            stopListening()
+            val sent = service.clickVisibleLabel("send", "भेजें", "भेजो", "send message")
+            pendingMessageReady = false
+            pendingMessagePackage = ""
+            finishAction(if (sent) "Send button दबा दिया।" else "Send button नहीं मिला; message draft में सुरक्षित है।")
+            return
+        }
         val app = resolveTargetApp(command)
         if (app == null) {
             speakAndListen("कौन सा ऐप खोलना है? WhatsApp, Instagram या Facebook बोलें।")
