@@ -257,6 +257,62 @@ class AgentAccessibilityService : AccessibilityService() {
     }
 
 
+    /** True only when the requested app owns the current accessibility window. */
+    fun isPackageForeground(packageName: String): Boolean {
+        val root = rootInActiveWindow ?: return false
+        val active = root.packageName?.toString() == packageName
+        root.recycle()
+        return active
+    }
+
+    /** Types into the app's search field, preferring fields whose hint or resource id says search. */
+    fun typeIntoSearchField(value: String): Boolean {
+        val root = rootInActiveWindow ?: return false
+        val nodes = mutableListOf<AccessibilityNodeInfo>()
+        collectEditableNodes(root, nodes, 0)
+        root.recycle()
+        if (nodes.isEmpty()) return false
+        val target = nodes.firstOrNull { node ->
+            val hint = node.hintText?.toString()?.lowercase(Locale.ROOT).orEmpty()
+            val id = node.viewIdResourceName?.lowercase(Locale.ROOT).orEmpty()
+            node.isVisibleToUser && node.isEnabled && (hint.contains("search") || id.contains("search"))
+        } ?: nodes.firstOrNull { it.isVisibleToUser && it.isEnabled }
+        nodes.filter { it !== target }.forEach { it.recycle() }
+        if (target == null) return false
+        val args = android.os.Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value)
+        }
+        val focused = target.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+        val changed = target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        target.recycle()
+        return focused && changed
+    }
+
+    /** Types only into a likely chat composer, never an arbitrary first field. */
+    fun typeMessageIntoComposer(value: String): Boolean {
+        val root = rootInActiveWindow ?: return false
+        val nodes = mutableListOf<AccessibilityNodeInfo>()
+        collectEditableNodes(root, nodes, 0)
+        root.recycle()
+        if (nodes.isEmpty()) return false
+        val target = nodes.firstOrNull { node ->
+            val hint = node.hintText?.toString()?.lowercase(Locale.ROOT).orEmpty()
+            val id = node.viewIdResourceName?.lowercase(Locale.ROOT).orEmpty()
+            node.isVisibleToUser && node.isEnabled &&
+                (hint.contains("message") || hint.contains("type a message") ||
+                 id.contains("message") || id.contains("composer") || id.contains("input"))
+        }
+        nodes.filter { it !== target }.forEach { it.recycle() }
+        if (target == null) return false
+        val args = android.os.Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value)
+        }
+        val focused = target.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+        val changed = target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        target.recycle()
+        return focused && changed
+    }
+
     /** Opens a visible app by package name. */
     fun launchInstalledApp(packageName: String): Boolean {
         val launch = packageManager.getLaunchIntentForPackage(packageName) ?: return false
