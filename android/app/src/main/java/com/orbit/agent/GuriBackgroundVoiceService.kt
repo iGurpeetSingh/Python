@@ -40,7 +40,7 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
+        when (intent?.action ?: ACTION_LISTEN) {
             ACTION_LISTEN -> startBackgroundListening()
             ACTION_PAUSE -> stopBackgroundListening()
             ACTION_STOP -> {
