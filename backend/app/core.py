@@ -172,7 +172,7 @@ async def phone():
     if not devices:
         raise HTTPException(
             409,
-            "No authorized Android phone. Enable USB debugging and approve this computer.",
+            "Android phone not authorized. Connect it with a USB data cable, enable Developer options → USB debugging, then tap Allow on the phone when Android asks to trust this computer.",
         )
     return devices[0]
 
