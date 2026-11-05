@@ -27,12 +27,7 @@ class AgentAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
-        val prefs = getSharedPreferences("guri_cloud", MODE_PRIVATE)
-        val url = prefs.getString("url", "").orEmpty()
-        val code = prefs.getString("code", "").orEmpty()
-        if (url.isNotBlank() && code.isNotBlank()) {
-            connectCloud(url, code)
-        }
+        // Standalone on-device mode: no cloud URL or pairing setup is required.
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -120,7 +115,7 @@ class AgentAccessibilityService : AccessibilityService() {
         // Fallback for Instagram builds that hide the Reels label from accessibility.
         // Reels is conventionally the second item in Instagram's bottom navigation.
         val metrics = resources.displayMetrics
-        val x = metrics.widthPixels * .30f
+        val x = metrics.widthPixels * .40f
         val y = metrics.heightPixels * .94f
         val path = Path().apply {
             moveTo(x, y)
