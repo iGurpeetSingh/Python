@@ -285,7 +285,7 @@ class AgentAccessibilityService : AccessibilityService() {
         val focused = target.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
         val changed = target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
         target.recycle()
-        return focused && changed
+        return changed
     }
 
     /** Types only into a likely chat composer, never an arbitrary first field. */
