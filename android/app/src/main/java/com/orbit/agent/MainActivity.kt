@@ -115,12 +115,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     override fun onPause() {
         isResumed = false
+        // The foreground microphone service owns recognition. Do not restart it
+        // from onPause: Android 14+ restricts starting microphone FGS in background.
         stopListening()
-        // The microphone foreground service was created while this Activity was visible.
-        // Reuse that running service instead of starting a microphone FGS from background.
-        try {
-            startService(Intent(this, GuriBackgroundVoiceService::class.java).setAction(GuriBackgroundVoiceService.ACTION_LISTEN))
-        } catch (_: Exception) { }
         super.onPause()
     }
 
@@ -464,27 +461,43 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun resolveTargetApp(command: String): Pair<String, String>? {
-        val apps = listOf(
+        val aliases = listOf(
             Triple("instagram", "Instagram", "com.instagram.android"),
             Triple("इंस्टाग्राम", "Instagram", "com.instagram.android"),
             Triple("whatsapp", "WhatsApp", "com.whatsapp"),
+            Triple("what's app", "WhatsApp", "com.whatsapp"),
             Triple("व्हाट्सएप", "WhatsApp", "com.whatsapp"),
+            Triple("व्हाट्स ऐप", "WhatsApp", "com.whatsapp"),
+            Triple("वॉट्सऐप", "WhatsApp", "com.whatsapp"),
             Triple("facebook", "Facebook", "com.facebook.katana"),
             Triple("फेसबुक", "Facebook", "com.facebook.katana"),
-            Triple("free fire", "Free Fire", "com.dts.freefireth"),
-            Triple("free fire india", "Free Fire", "com.dts.freefireth"),
-            Triple("फ्री फायर", "Free Fire", "com.dts.freefireth"),
-            Triple("pubg", "PUBG Mobile", "com.tencent.ig"),
-            Triple("pubg mobile", "PUBG Mobile", "com.tencent.ig"),
-            Triple("bgmi", "BGMI", "com.pubg.imobile"),
-            Triple("बीजीएमआई", "BGMI", "com.pubg.imobile"),
-            Triple("पबजी", "PUBG Mobile", "com.tencent.ig")
+            Triple("telegram", "Telegram", "org.telegram.messenger"),
+            Triple("टेलीग्राम", "Telegram", "org.telegram.messenger"),
+            Triple("snapchat", "Snapchat", "com.snapchat.android"),
+            Triple("स्नैपचैट", "Snapchat", "com.snapchat.android"),
+            Triple("x", "X", "com.twitter.android"),
+            Triple("twitter", "X", "com.twitter.android"),
+            Triple("youtube", "YouTube", "com.google.android.youtube"),
+            Triple("यूट्यूब", "YouTube", "com.google.android.youtube")
         )
-        val found = apps.mapNotNull { alias ->
-            val index = command.indexOf(alias.first, ignoreCase = true)
+        val normalized = command.lowercase(Locale.ROOT)
+        val known = aliases.mapNotNull { alias ->
+            val index = normalized.indexOf(alias.first)
             if (index >= 0) Triple(index, alias.second, alias.third) else null
-        }.minByOrNull { it.first } ?: return null
-        return found.second to found.third
+        }.minByOrNull { it.first }
+        if (known != null) return known.second to known.third
+
+        // Generic fallback: resolve any installed launcher app by its visible label.
+        val launchIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        val installed = packageManager.queryIntentActivities(launchIntent, 0)
+        val match = installed.mapNotNull { info ->
+            val label = info.loadLabel(packageManager)?.toString()?.trim().orEmpty()
+            val packageName = info.activityInfo?.packageName.orEmpty()
+            if (label.length < 2 || packageName.isBlank()) null
+            else if (normalized.contains(label.lowercase(Locale.ROOT))) Triple(label.length, label, packageName)
+            else null
+        }.maxByOrNull { it.first }
+        return match?.let { it.second to it.third }
     }
 
     private fun extractSearchText(command: String): String? {
