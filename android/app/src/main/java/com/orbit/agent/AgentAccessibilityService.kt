@@ -144,29 +144,13 @@ class AgentAccessibilityService : AccessibilityService() {
         collectReelsNodes(root, matches, depth = 0)
         root.recycle()
 
-        val sorted = matches.sortedByDescending { it.isClickable }
+        // Never guess a screen coordinate here: a blind tap can open the
+        // comment composer or another control instead of the Reels tab.
+        val target = matches.firstOrNull { it.isVisibleToUser && it.isEnabled }
         var clicked = false
-        for (node in sorted) {
-            if (!clicked && node.isVisibleToUser) {
-                clicked = clickNode(node)
-            }
-            node.recycle()
-        }
-        if (clicked) return true
-
-        // Fallback for Instagram builds that hide the Reels label from accessibility.
-        // Reels is conventionally the second item in Instagram's bottom navigation.
-        val metrics = resources.displayMetrics
-        val x = metrics.widthPixels * .40f
-        val y = metrics.heightPixels * .94f
-        val path = Path().apply {
-            moveTo(x, y)
-            lineTo(x, y)
-        }
-        val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0, 120))
-            .build()
-        return dispatchGesture(gesture, null, null)
+        if (target != null) clicked = clickNode(target)
+        matches.forEach { it.recycle() }
+        return clicked
     }
 
     private fun collectReelsNodes(
@@ -215,47 +199,53 @@ class AgentAccessibilityService : AccessibilityService() {
 
     fun swipeReels(count: Int): Boolean = swipeReels(count) {}
 
-    /**
-     * Sends one swipe at a time and waits for Android's gesture callback before
-     * sending the next one. Completion is reported only after all gestures finish.
-     */
-    fun swipeReels(count: Int, onComplete: (Boolean) -> Unit): Boolean {
-        if (!isInstagramForeground()) return false
-        val total = count.coerceIn(1, 20)
-        val metrics = resources.displayMetrics
-        val x = metrics.widthPixels / 2f
-        val startY = metrics.heightPixels * .82f
-        val endY = metrics.heightPixels * .24f
+    /** One deliberate feed swipe, bounded to the active app's content window. */
+    fun swipeReels(count: Int, onComplete: (Boolean) -> Unit): Boolean =
+        swipeCurrentFeed(count, "com.instagram.android", onComplete)
+
+    /** Swipe the currently foreground app without touching editable/comment controls. */
+    fun swipeCurrentFeed(count: Int, expectedPackage: String? = null, onComplete: (Boolean) -> Unit = {}): Boolean {
+        val root = rootInActiveWindow ?: return false
+        val activePackage = root.packageName?.toString()
+        if (activePackage.isNullOrBlank() || (expectedPackage != null && activePackage != expectedPackage)) {
+            root.recycle()
+            return false
+        }
+        val bounds = android.graphics.Rect()
+        root.getBoundsInScreen(bounds)
+        root.recycle()
+        if (bounds.width() <= 0 || bounds.height() <= 0) return false
+
+        val total = count.coerceIn(1, 1) // one voice command = exactly one swipe
+        val x = bounds.left + bounds.width() * 0.52f
+        val startY = bounds.top + bounds.height() * 0.76f
+        val endY = bounds.top + bounds.height() * 0.28f
 
         fun send(index: Int) {
-            if (!isInstagramForeground()) {
-                onComplete(false)
-                return
-            }
+            val current = rootInActiveWindow ?: run { onComplete(false); return }
+            val stillForeground = current.packageName?.toString() == activePackage
+            current.recycle()
+            if (!stillForeground) { onComplete(false); return }
             val path = Path().apply {
                 moveTo(x, startY)
                 lineTo(x, endY)
             }
             val gesture = GestureDescription.Builder()
-                .addStroke(GestureDescription.StrokeDescription(path, 0, 430))
+                .addStroke(GestureDescription.StrokeDescription(path, 0, 500))
                 .build()
             val accepted = dispatchGesture(gesture, object : GestureResultCallback() {
                 override fun onCompleted(gestureDescription: GestureDescription?) {
-                    if (index + 1 >= total) onComplete(true)
-                    else handler.postDelayed({ send(index + 1) }, 550)
+                    onComplete(true)
                 }
-
                 override fun onCancelled(gestureDescription: GestureDescription?) {
                     onComplete(false)
                 }
             }, handler)
             if (!accepted) onComplete(false)
         }
-
         send(0)
         return true
     }
-
 
     /** True only when the requested app owns the current accessibility window. */
     fun isPackageForeground(packageName: String): Boolean {
