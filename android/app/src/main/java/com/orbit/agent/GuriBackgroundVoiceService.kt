@@ -61,15 +61,6 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun buildNotification(): Notification {
-        val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, CHANNEL_ID) else Notification.Builder(this)
-        return builder.setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentTitle("Guri voice control active")
-            .setContentText("Guri voice listening is active")
-            .setOngoing(true)
-            .build()
-    }
-
     private fun startBackgroundListening() {
         if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) return
         if (!SpeechRecognizer.isRecognitionAvailable(this)) return
