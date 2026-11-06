@@ -152,13 +152,16 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
             return
         }
 
-        if (asksNext) {
-            handleNextReelCommand()
+        val asksInstagram = listOf("instagram", "इंस्टाग्राम").any { normalized.contains(it) }
+        val asksWhatsApp = listOf("व्हाट्सएप", "व्हाट्स ऐप", "वाट्सएप", "whatsapp", "what's app").any { normalized.contains(it) }
+
+        if (asksWhatsApp || (whatsAppAwaitingContact && (normalized.contains("चैट") || normalized.contains("chat") || normalized.contains("नाम")))) {
+            handleWhatsAppCommand(normalized)
             return
         }
 
-        if (normalized.contains("व्हाट्सएप") || normalized.contains("whatsapp")) {
-            handleWhatsAppCommand(normalized)
+        if (asksInstagram || asksNext) {
+            handleInstagramCommand(asksNext)
             return
         }
         if (whatsAppAwaitingContact && (normalized.contains("चैट") || normalized.contains("chat") || normalized.contains("नाम"))) {
@@ -169,21 +172,59 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
         handler.postDelayed({ startRecognition() }, 350)
     }
 
-    private fun handleNextReelCommand() {
-        actionInProgress = true
-        updateListeningNotification("Guri ने Reel command पहचानी — swipe कर रही है")
-        try { recognizer?.cancel() } catch (_: Exception) {}
+    private fun handleInstagramCommand(shouldScroll: Boolean) {
         val service = AgentAccessibilityService.instance
-        if (service == null || !service.isInstagramForeground()) {
-            speak("Instagram पर Reel खुली होनी चाहिए।")
+        if (service == null) {
+            speak("फोन कंट्रोल चालू नहीं है। Guri की Accessibility अनुमति चालू करें।")
             return
         }
-        val accepted = service.swipeReels(1) { completed ->
-            handler.post {
-                speak(if (completed) "अगली Reel कर दी।" else "Reel swipe नहीं हो पाया।")
+        actionInProgress = true
+        try { recognizer?.cancel() } catch (_: Exception) {}
+        val packageName = "com.instagram.android"
+        val alreadyOpen = service.isPackageForeground(packageName)
+        if (!alreadyOpen) {
+            val launch = packageManager.getLaunchIntentForPackage(packageName)
+            if (launch == null) {
+                speak("Instagram इस फोन में इंस्टॉल नहीं है।")
+                return
+            }
+            try {
+                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(launch)
+            } catch (_: Exception) {
+                speak("Instagram नहीं खुल पाया।")
+                return
             }
         }
-        if (!accepted) speak("Instagram पर swipe शुरू नहीं हुआ।")
+        if (!shouldScroll) {
+            speak("Instagram खोल दिया है।")
+            return
+        }
+        updateListeningNotification("Instagram खुल रहा है — Reels तैयार कर रही हूँ")
+        handler.postDelayed({
+            if (!service.isPackageForeground(packageName)) {
+                speak("Instagram खुला नहीं मिला। स्क्रीन पर Instagram लाकर दोबारा बोलें।")
+                return@postDelayed
+            }
+            val reelsOpened = service.openReelsTab()
+            if (!reelsOpened) {
+                speak("Instagram खुल गया, लेकिन Reels tab नहीं मिला।")
+                return@postDelayed
+            }
+            handler.postDelayed({
+                if (!service.isInstagramForeground()) {
+                    speak("Instagram की स्क्रीन बदल गई; swipe नहीं किया।")
+                    return@postDelayed
+                }
+                val accepted = service.swipeReels(1) { completed ->
+                    handler.post {
+                        speak(if (completed) "एक Reel आगे कर दी। अगली Reel के लिए फिर बोलें।"
+                              else "Reel swipe पूरा नहीं हुआ।")
+                    }
+                }
+                if (!accepted) speak("Reel पर swipe शुरू नहीं हुआ।")
+            }, 650)
+        }, if (alreadyOpen) 250 else 1800)
     }
 
     private fun handleWhatsAppCommand(command: String) {
@@ -255,7 +296,7 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
 
     private fun extractWhatsAppRecipient(command: String): String? {
         val source = command
-            .replace(Regex("whatsapp|व्हाट्सएप", RegexOption.IGNORE_CASE), " ")
+            .replace(Regex("whatsapp|what's app|व्हाट्सएप|व्हाट्स ऐप|वाट्सएप", RegexOption.IGNORE_CASE), " ")
             .replace(Regex("गुरी|गुरि|गुरू|\\bguri\\b", RegexOption.IGNORE_CASE), " ")
             .replace(Regex("ओपन करो|open करो|खोलो|ओपन|open|जाओ|जाके|जाकर|उसमें|उसमें जाकर|उस चैट में|एक|है|चैट|chat|में|जाना|जाना है|जाकर|फिर|उसको|लिखो|लिखना|hi|हाय|send|सेंड|नहीं करना|मत भेजना|भेजना नहीं", RegexOption.IGNORE_CASE), " ")
             .replace(Regex("\\s+"), " ").trim()
