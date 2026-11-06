@@ -26,6 +26,7 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
     private var tts: TextToSpeech? = null
     private var listening = false
     private var actionInProgress = false
+    private var whatsAppAwaitingContact = false
 
     override fun onCreate() {
         super.onCreate()
@@ -160,6 +161,10 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
             handleWhatsAppCommand(normalized)
             return
         }
+        if (whatsAppAwaitingContact && (normalized.contains("चैट") || normalized.contains("chat") || normalized.contains("नाम"))) {
+            handleWhatsAppCommand(normalized)
+            return
+        }
 
         handler.postDelayed({ startRecognition() }, 350)
     }
@@ -188,29 +193,34 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
             return
         }
         val recipient = extractWhatsAppRecipient(command)
-        if (recipient.isNullOrBlank()) {
-            speak("किस नाम की WhatsApp chat खोलनी है?")
-            return
-        }
         actionInProgress = true
-        updateListeningNotification("WhatsApp में $recipient chat खोल रही हूँ")
         val launch = packageManager.getLaunchIntentForPackage("com.whatsapp")
         if (launch == null) {
             speak("WhatsApp इस फोन में इंस्टॉल नहीं है।")
             return
         }
-        try {
-            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            startActivity(launch)
-        } catch (_: Exception) {
-            speak("WhatsApp नहीं खुल पाया।")
-            return
+        if (!service.isPackageForeground("com.whatsapp")) {
+            try {
+                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(launch)
+            } catch (_: Exception) {
+                speak("WhatsApp नहीं खुल पाया।")
+                return
+            }
         }
+
         handler.postDelayed({
             if (!service.isPackageForeground("com.whatsapp")) {
                 speak("WhatsApp अभी स्क्रीन पर active नहीं है।")
                 return@postDelayed
             }
+            if (recipient.isNullOrBlank()) {
+                whatsAppAwaitingContact = true
+                speak("WhatsApp खोल दिया है। अब chat का नाम बताइए।")
+                return@postDelayed
+            }
+            whatsAppAwaitingContact = false
+            updateListeningNotification("WhatsApp में $recipient chat खोल रही हूँ")
             val searchOpened = service.clickVisibleLabel(
                 "search", "Search", "Search chats", "खोजें", "खोज", "Search contacts"
             )
@@ -240,7 +250,7 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
                     }, 1100)
                 }, 1500)
             }, if (searchOpened) 650 else 1000)
-        }, 1600)
+        }, 1200)
     }
 
     private fun extractWhatsAppRecipient(command: String): String? {
