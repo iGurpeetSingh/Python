@@ -101,6 +101,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         updateAccessibilityButton()
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_AUDIO)
+        } else {
+            requestNotificationPermissionIfNeeded()
         }
     }
 
@@ -131,6 +133,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         } catch (_: Exception) { /* Foreground activity listener remains available. */ }
     }
 
+    private fun requestNotificationPermissionIfNeeded() {
+        if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
+        }
+    }
+
     private fun hasAudioPermission() =
         checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
@@ -150,6 +158,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if (requestCode == REQUEST_AUDIO) {
             if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
                 listeningEnabled = true
+                requestNotificationPermissionIfNeeded()
                 startBackgroundVoiceService(GuriBackgroundVoiceService.ACTION_LISTEN)
                 status.text = "गुरी बैकग्राउंड में सुन रही है…"
             } else status.text = "Voice चलाने के लिए Microphone permission जरूरी है।"
@@ -572,5 +581,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         super.onDestroy()
     }
 
-    companion object { private const val REQUEST_AUDIO = 42 }
+    companion object {
+        private const val REQUEST_AUDIO = 42
+        private const val REQUEST_NOTIFICATIONS = 43
+    }
 }
