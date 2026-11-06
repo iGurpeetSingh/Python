@@ -132,6 +132,7 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "hi-IN")
+            putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, false)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
         }
@@ -141,16 +142,23 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
 
     private fun handleBackgroundCommand(raw: String) {
         val normalized = raw.lowercase(Locale.ROOT)
-            .replace("गुरि", "गुरी").replace("गुरू", "गुरी")
+            .replace("गुरि", "गुरी")
+            .replace("गुरू", "गुरी")
+            .replace("गुरु", "गुरी")
+            .replace("गुरूजी", "गुरी")
+            .replace("गुरुजी", "गुरी")
         val hasWakeWord = normalized.contains("गुरी") || normalized.contains("guri")
-        val asksNext = listOf("अगली", "अगला", "फिर स्क्रॉल", "फिर स्क्रोल", "रील स्क्रॉल",
+        val asksNext = listOf("अगली", "अगला", "फिर स्क्रॉल", "फिर स्क्रोल", "रील को स्क्रॉल", "रील को स्क्रोल", "रील स्क्रॉल",
             "रील स्क्रोल", "रील स्क्रॉल करो", "रील स्क्रोल करो", "री स्क्रॉल", "री स्क्रोल",
             "रीस्क्रॉल", "रीस्क्रोल", "स्क्रॉल करो", "स्क्रोल करो", "स्क्रॉल", "स्क्रोल", "next reel", "scroll up", "swipe up", "reel scroll")
             .any { normalized.contains(it) }
         if (!hasWakeWord) {
+            updateListeningNotification("आवाज़ मिली, Guri नाम नहीं पहचाना: " + normalized.take(70))
             handler.postDelayed({ startRecognition() }, 350)
             return
         }
+
+        updateListeningNotification("कमांड पहचानी: " + normalized.take(70))
 
         val asksInstagram = listOf("instagram", "इंस्टाग्राम").any { normalized.contains(it) }
         val asksWhatsApp = listOf("व्हाट्सएप", "व्हाट्स ऐप", "वाट्सएप", "whatsapp", "what's app").any { normalized.contains(it) }
