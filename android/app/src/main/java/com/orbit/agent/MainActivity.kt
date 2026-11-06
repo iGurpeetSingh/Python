@@ -343,7 +343,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         status.text = "$appName में $recipient खोज रही हूँ…"
         val searchClicked = service.clickVisibleLabel(
-            "search", "खोजें", "खोज", "Search", "Search chats", "Search people"
+            "search", "खोजें", "खोज", "Search", "Search chats", "Search people", "Search contacts", "Chats", "चैट"
         )
         handler.postDelayed({
             if (!service.isPackageForeground(packageName)) {
@@ -397,11 +397,29 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun extractRecipient(command: String, appName: String): String? {
+        // Hindi/Hinglish natural phrasing: "U ke naam se ek chat hai",
+        // "U naam ki chat", "U wali chat", "chat named U".
+        val recipientPatterns = listOf(
+            Regex("([\\p{L}][\\p{L}0-9 .'-]{0,28}?)\\s+(?:के नाम से|नाम से)\\s+(?:एक\\s+)?(?:चैट|chat)", RegexOption.IGNORE_CASE),
+            Regex("([\\p{L}][\\p{L}0-9 .'-]{0,28}?)\\s+(?:नाम की|नाम का|नाम वाला|नाम वाली)\\s+(?:चैट|chat)", RegexOption.IGNORE_CASE),
+            Regex("(?:चैट|chat)\\s+(?:का नाम|नाम है|named)\\s+([\\p{L}][\\p{L}0-9 .'-]{0,28})", RegexOption.IGNORE_CASE),
+            Regex("(?:chat|चैट)\\s+(?:में|मे)\\s+([\\p{L}][\\p{L}0-9 .'-]{0,28})", RegexOption.IGNORE_CASE)
+        )
+        for (pattern in recipientPatterns) {
+            val candidate = pattern.find(command)?.groupValues?.getOrNull(1)?.trim()
+            if (!candidate.isNullOrBlank()) {
+                val cleanedCandidate = candidate
+                    .replace(Regex("^(?:एक|मेरी|मेरा|मेरे)\\s+"), "")
+                    .replace(Regex("\\s+(?:है|वाली|वाला)$"), "").trim()
+                if (cleanedCandidate.isNotBlank()) return cleanedCandidate
+            }
+        }
+
         val personalName = Regex("(?:मेरी|मेरा|मेरे|my)\\s+([\\p{L}][\\p{L} .'-]{1,28}?)\\s+(?:के नाम|का नाम|की प्रोफाइल|की profile)", RegexOption.IGNORE_CASE)
             .find(command)?.groupValues?.getOrNull(1)?.trim()
         if (!personalName.isNullOrBlank()) return personalName
 
-        val namedContact = Regex("(?:दोस्त|फ्रेंड|friend|contact|chat|profile|प्रोफाइल)\\s+(?:का नाम\\s+)?([\\p{L}][\\p{L} .'-]{1,28})", RegexOption.IGNORE_CASE)
+        val namedContact = Regex("(?:दोस्त|फ्रेंड|friend|contact|chat|चैट|profile|प्रोफाइल)\\s+(?:का नाम\\s+)?([\\p{L}][\\p{L} .'-]{1,28})", RegexOption.IGNORE_CASE)
             .find(command)?.groupValues?.getOrNull(1)?.trim()
         if (!namedContact.isNullOrBlank()) return namedContact
 
