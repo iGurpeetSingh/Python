@@ -218,8 +218,10 @@ class AgentAccessibilityService : AccessibilityService() {
 
         val total = count.coerceIn(1, 1) // one voice command = exactly one swipe
         val x = bounds.left + bounds.width() * 0.52f
-        val startY = bounds.top + bounds.height() * 0.76f
-        val endY = bounds.top + bounds.height() * 0.28f
+        // Instagram overlays comments and action controls near the lower edge.
+        // Start in the lower-middle of the video, not on the comment composer.
+        val startY = bounds.top + bounds.height() * 0.66f
+        val endY = bounds.top + bounds.height() * 0.30f
 
         fun send(index: Int) {
             val current = rootInActiveWindow ?: run { onComplete(false); return }
