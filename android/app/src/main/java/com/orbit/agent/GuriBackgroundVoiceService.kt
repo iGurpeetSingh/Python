@@ -65,7 +65,7 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
         val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, CHANNEL_ID) else Notification.Builder(this)
         return builder.setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentTitle("Guri voice control active")
-            .setContentText("Instagram में Reel command सुनने के लिए तैयार")
+            .setContentText("Guri voice listening is active")
             .setOngoing(true)
             .build()
     }
@@ -75,12 +75,28 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
         if (!SpeechRecognizer.isRecognitionAvailable(this)) return
         listening = true
         actionInProgress = false
+        updateListeningNotification("Guri सुन रही है — Instagram Reel command बोलें")
         startRecognition()
+    }
+
+    private fun updateListeningNotification(message: String) {
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.notify(NOTIFICATION_ID, buildNotification(message))
+    }
+
+    private fun buildNotification(message: String = "Guri voice control active"): Notification {
+        val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, CHANNEL_ID) else Notification.Builder(this)
+        return builder.setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setContentTitle("Guri Voice Control")
+            .setContentText(message)
+            .setOngoing(true)
+            .build()
     }
 
     private fun stopBackgroundListening() {
         listening = false
         actionInProgress = false
+        updateListeningNotification("Guri voice control बंद है")
         handler.removeCallbacksAndMessages(null)
         try { recognizer?.cancel() } catch (_: Exception) {}
     }
@@ -95,7 +111,15 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
                 override fun onBufferReceived(buffer: ByteArray?) {}
                 override fun onEndOfSpeech() {}
                 override fun onError(error: Int) {
-                    if (listening && !actionInProgress) handler.postDelayed({ startRecognition() }, 700)
+                    if (!listening || actionInProgress) return
+                    // Google SpeechRecognizer is a one-shot recognizer. Recreate it after
+                    // end/error so the next command is not lost in a BUSY state.
+                    handler.postDelayed({
+                        try { recognizer?.cancel() } catch (_: Exception) {}
+                        try { recognizer?.destroy() } catch (_: Exception) {}
+                        recognizer = null
+                        startRecognition()
+                    }, if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 1200 else 500)
                 }
                 override fun onResults(results: Bundle?) {
                     if (!listening || actionInProgress) return
@@ -137,6 +161,7 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
         }
 
         actionInProgress = true
+        updateListeningNotification("Guri ने Reel command पहचानी — swipe कर रही है")
         try { recognizer?.cancel() } catch (_: Exception) {}
         val service = AgentAccessibilityService.instance
         if (service == null || !service.isInstagramForeground()) {
@@ -155,6 +180,7 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
         tts?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "guri-background-result")
         handler.postDelayed({
             actionInProgress = false
+            updateListeningNotification("Guri सुन रही है — अगली Reel command बोलें")
             startRecognition()
         }, 1500)
     }
