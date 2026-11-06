@@ -70,7 +70,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setOnClickListener {
                 listeningEnabled = !listeningEnabled
                 if (listeningEnabled) {
-                    startListening()
+                    startBackgroundVoiceService(GuriBackgroundVoiceService.ACTION_LISTEN)
                     text = "माइक बंद करें"
                 } else {
                     stopListening()
@@ -98,7 +98,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         layout.addView(accessibilityButton)
         layout.addView(help)
         setContentView(layout)
-        startBackgroundVoiceService(GuriBackgroundVoiceService.ACTION_PAUSE)
         updateAccessibilityButton()
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_AUDIO)
@@ -108,9 +107,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     override fun onResume() {
         super.onResume()
         isResumed = true
-        startBackgroundVoiceService(GuriBackgroundVoiceService.ACTION_PAUSE)
         updateAccessibilityButton()
-        if (listeningEnabled && hasAudioPermission()) handler.postDelayed({ startListening() }, 650)
+        if (listeningEnabled && hasAudioPermission()) startBackgroundVoiceService(GuriBackgroundVoiceService.ACTION_LISTEN)
     }
 
     override fun onPause() {
@@ -152,8 +150,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if (requestCode == REQUEST_AUDIO) {
             if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
                 listeningEnabled = true
-                startBackgroundVoiceService(GuriBackgroundVoiceService.ACTION_PAUSE)
-                handler.postDelayed({ startListening() }, 500)
+                startBackgroundVoiceService(GuriBackgroundVoiceService.ACTION_LISTEN)
+                status.text = "गुरी बैकग्राउंड में सुन रही है…"
             } else status.text = "Voice चलाने के लिए Microphone permission जरूरी है।"
         }
     }
