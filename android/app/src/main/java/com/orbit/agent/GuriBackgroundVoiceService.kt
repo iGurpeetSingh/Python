@@ -249,44 +249,40 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun handleInstagramCommand(shouldScroll: Boolean) {
-        // Launching Instagram must not depend on Accessibility being connected.
-        // Accessibility is needed only for foreground verification and Reel gestures.
+        val service = AgentAccessibilityService.instance
         actionInProgress = true
         try { recognizer?.cancel() } catch (_: Exception) {}
         val packageName = "com.instagram.android"
-        val service = AgentAccessibilityService.instance
+        val launch = packageManager.getLaunchIntentForPackage(packageName)
+        if (launch == null) {
+            speak("Instagram इस फोन में इंस्टॉल नहीं है।")
+            return
+        }
+        // Opening Instagram must not depend on Accessibility being enabled.
+        // Accessibility is needed only for automated Reels navigation/swipes.
         val alreadyOpen = service?.isPackageForeground(packageName) == true
-
         if (!alreadyOpen) {
-            val launch = packageManager.getLaunchIntentForPackage(packageName)
-            if (launch == null) {
-                speak("Instagram इस फोन में इंस्टॉल नहीं है।")
-                return
-            }
             try {
                 launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 val launchedByAccessibility = service?.launchInstalledApp(packageName) == true
                 if (!launchedByAccessibility) startActivity(launch)
             } catch (_: Exception) {
-                speak("Instagram नहीं खुल पाया। फोन में Guri को Accessibility permission दें और फिर कोशिश करें।")
+                speak("Instagram नहीं खुल पाया।")
                 return
             }
         }
-
         if (!shouldScroll) {
             speak("Instagram खोल दिया है।")
             return
         }
-
         if (service == null) {
-            speak("Instagram खोल दिया है। Reel scroll करने के लिए Guri की Accessibility permission चालू करें।")
+            speak("Instagram खोल दिया है। Reels control के लिए Guri की Accessibility अनुमति चालू करें।")
             return
         }
-
         updateListeningNotification("Instagram खुल रहा है — Reels तैयार कर रही हूँ")
         handler.postDelayed({
             if (!service.isPackageForeground(packageName)) {
-                speak("Instagram खुला नहीं मिला। एक बार Instagram स्क्रीन पर खोलें और फिर बोलें।")
+                speak("Instagram खुला नहीं मिला। स्क्रीन पर Instagram लाकर दोबारा बोलें।")
                 return@postDelayed
             }
             val reelsOpened = if (alreadyOpen) true else service.openReelsTab()
