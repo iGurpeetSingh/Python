@@ -174,6 +174,13 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
                 speak("फोन कंट्रोल चालू नहीं है। Guri की Accessibility अनुमति चालू करें।")
                 return
             }
+            // If Instagram is already in front, route Reel commands through the
+            // Instagram-only swipe path. Never fall through to a generic swipe:
+            // that path can land on Instagram's comment/action controls.
+            if (service.isInstagramForeground()) {
+                handleInstagramCommand(shouldScroll = true)
+                return
+            }
             actionInProgress = true
             try { recognizer?.cancel() } catch (_: Exception) {}
             val accepted = service.swipeCurrentFeed(1) { completed ->
