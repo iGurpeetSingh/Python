@@ -146,11 +146,25 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
             "रील स्क्रोल", "रील स्क्रॉल करो", "रील स्क्रोल करो", "री स्क्रॉल", "री स्क्रोल",
             "रीस्क्रॉल", "रीस्क्रोल", "स्क्रॉल करो", "स्क्रोल करो", "स्क्रॉल", "स्क्रोल", "next reel", "scroll up", "swipe up", "reel scroll")
             .any { normalized.contains(it) }
-        if (!hasWakeWord || !asksNext) {
+        if (!hasWakeWord) {
             handler.postDelayed({ startRecognition() }, 350)
             return
         }
 
+        if (asksNext) {
+            handleNextReelCommand()
+            return
+        }
+
+        if (normalized.contains("व्हाट्सएप") || normalized.contains("whatsapp")) {
+            handleWhatsAppCommand(normalized)
+            return
+        }
+
+        handler.postDelayed({ startRecognition() }, 350)
+    }
+
+    private fun handleNextReelCommand() {
         actionInProgress = true
         updateListeningNotification("Guri ने Reel command पहचानी — swipe कर रही है")
         try { recognizer?.cancel() } catch (_: Exception) {}
@@ -165,6 +179,86 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
             }
         }
         if (!accepted) speak("Instagram पर swipe शुरू नहीं हुआ।")
+    }
+
+    private fun handleWhatsAppCommand(command: String) {
+        val service = AgentAccessibilityService.instance
+        if (service == null) {
+            speak("फोन कंट्रोल चालू नहीं है। Guri की Accessibility अनुमति चालू करें।")
+            return
+        }
+        val recipient = extractWhatsAppRecipient(command)
+        if (recipient.isNullOrBlank()) {
+            speak("किस नाम की WhatsApp chat खोलनी है?")
+            return
+        }
+        actionInProgress = true
+        updateListeningNotification("WhatsApp में $recipient chat खोल रही हूँ")
+        val launch = packageManager.getLaunchIntentForPackage("com.whatsapp")
+        if (launch == null) {
+            speak("WhatsApp इस फोन में इंस्टॉल नहीं है।")
+            return
+        }
+        try {
+            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(launch)
+        } catch (_: Exception) {
+            speak("WhatsApp नहीं खुल पाया।")
+            return
+        }
+        handler.postDelayed({
+            if (!service.isPackageForeground("com.whatsapp")) {
+                speak("WhatsApp अभी स्क्रीन पर active नहीं है।")
+                return@postDelayed
+            }
+            val searchOpened = service.clickVisibleLabel(
+                "search", "Search", "Search chats", "खोजें", "खोज", "Search contacts"
+            )
+            handler.postDelayed({
+                if (!service.isPackageForeground("com.whatsapp")) {
+                    speak("WhatsApp की स्क्रीन बदल गई।")
+                    return@postDelayed
+                }
+                val typed = service.typeIntoSearchField(recipient)
+                if (!typed) {
+                    speak("WhatsApp की Search field नहीं मिली।")
+                    return@postDelayed
+                }
+                handler.postDelayed({
+                    val chatOpened = service.clickVisibleLabel(recipient)
+                    if (!chatOpened) {
+                        speak("$recipient नाम की chat नहीं मिली।")
+                        return@postDelayed
+                    }
+                    handler.postDelayed({
+                        val drafted = service.typeMessageIntoComposer("Hi")
+                        if (drafted) {
+                            speak("$recipient की WhatsApp chat में Hi लिख दिया है। Send नहीं किया है।")
+                        } else {
+                            speak("Chat खुल गई, लेकिन message box नहीं मिला। Hi नहीं लिखा गया।")
+                        }
+                    }, 1100)
+                }, 1500)
+            }, if (searchOpened) 650 else 1000)
+        }, 1600)
+    }
+
+    private fun extractWhatsAppRecipient(command: String): String? {
+        val source = command
+            .replace(Regex("whatsapp|व्हाट्सएप", RegexOption.IGNORE_CASE), " ")
+            .replace(Regex("गुरी|गुरि|गुरू|\\bguri\\b", RegexOption.IGNORE_CASE), " ")
+            .replace(Regex("ओपन करो|open करो|खोलो|ओपन|open|जाओ|जाके|जाकर|उसमें|उसमें जाकर|उस चैट में|एक|है|चैट|chat|में|जाना|जाना है|जाकर|फिर|उसको|लिखो|लिखना|hi|हाय|send|सेंड|नहीं करना|मत भेजना|भेजना नहीं", RegexOption.IGNORE_CASE), " ")
+            .replace(Regex("\\s+"), " ").trim()
+        val patterns = listOf(
+            Regex("([\\p{L}][\\p{L}0-9 .'-]{0,24}?)\\s+के नाम से", RegexOption.IGNORE_CASE),
+            Regex("([\\p{L}][\\p{L}0-9 .'-]{0,24}?)\\s+नाम की", RegexOption.IGNORE_CASE),
+            Regex("नाम से\\s+([\\p{L}][\\p{L}0-9 .'-]{0,24})", RegexOption.IGNORE_CASE)
+        )
+        for (pattern in patterns) {
+            val value = pattern.find(source)?.groupValues?.getOrNull(1)?.trim()
+            if (!value.isNullOrBlank()) return value
+        }
+        return null
     }
 
     private fun speak(message: String) {
