@@ -14,6 +14,7 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import java.util.Locale
 
 /**
@@ -27,6 +28,7 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
     private var listening = false
     private var actionInProgress = false
     private var whatsAppAwaitingContact = false
+    @Volatile private var ttsSpeaking = false
 
     override fun onCreate() {
         super.onCreate()
@@ -103,19 +105,15 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
                 override fun onBufferReceived(buffer: ByteArray?) {}
                 override fun onEndOfSpeech() {}
                 override fun onError(error: Int) {
-                    if (!listening || actionInProgress) return
-                    // Google SpeechRecognizer is a one-shot recognizer. Recreate it after
-                    // end/error so the next command is not lost in a BUSY state.
-                    handler.postDelayed({
-                        try { recognizer?.cancel() } catch (_: Exception) {}
-                        try { recognizer?.destroy() } catch (_: Exception) {}
-                        recognizer = null
-                        startRecognition()
-                    }, if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 1200 else 500)
+                    if (!listening || actionInProgress || ttsSpeaking) return
+                    resetRecognizer()
+                    handler.postDelayed({ startRecognition() },
+                        if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 1400 else 700)
                 }
                 override fun onResults(results: Bundle?) {
                     if (!listening || actionInProgress) return
                     val phrase = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
+                    resetRecognizer()
                     handleBackgroundCommand(phrase)
                 }
                 override fun onPartialResults(partialResults: Bundle?) {}
@@ -125,8 +123,16 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
         return true
     }
 
+    private fun resetRecognizer() {
+        val old = recognizer
+        recognizer = null
+        try { old?.cancel() } catch (_: Exception) {}
+        try { old?.destroy() } catch (_: Exception) {}
+    }
+
     private fun startRecognition() {
-        if (!listening || actionInProgress) return
+        if (!listening || actionInProgress || ttsSpeaking) return
+        if (recognizer != null) resetRecognizer()
         if (!ensureRecognizer()) return
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -164,7 +170,7 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
 
         updateListeningNotification("कमांड पहचानी: " + normalized.take(70))
 
-        val asksInstagram = listOf("instagram", "इंस्टाग्राम").any { normalized.contains(it) }
+        val asksInstagram = listOf("instagram", "insta", "इंस्टाग्राम", "इंस्टा ग्राम", "इंस्टा").any { normalized.contains(it) }
         val asksWhatsApp = listOf("व्हाट्सएप", "व्हाट्स ऐप", "वाट्सएप", "whatsapp", "what's app").any { normalized.contains(it) }
 
         if (asksWhatsApp || (whatsAppAwaitingContact && (normalized.contains("चैट") || normalized.contains("chat") || normalized.contains("नाम")))) {
@@ -208,8 +214,10 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
                 actionInProgress = true
                 try {
                     launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    startActivity(launch)
-                    speak("${installedApp.first} खोल दिया है।")
+                    val accessibility = AgentAccessibilityService.instance
+                    val launched = accessibility?.launchInstalledApp(installedApp.second) == true
+                    if (!launched) startActivity(launch)
+                    speak("${installedApp.first} खोलने की कोशिश कर रही हूँ।")
                 } catch (_: Exception) {
                     speak("${installedApp.first} नहीं खुल पाया।")
                 }
@@ -257,8 +265,9 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
                 return
             }
             try {
-                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(launch)
+                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                val launched = service.launchInstalledApp(packageName)
+                if (!launched) startActivity(launch)
             } catch (_: Exception) {
                 speak("Instagram नहीं खुल पाया।")
                 return
@@ -381,16 +390,46 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun speak(message: String) {
-        tts?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "guri-background-result")
-        handler.postDelayed({
+        actionInProgress = true
+        ttsSpeaking = true
+        resetRecognizer()
+        val engine = tts
+        if (engine == null) {
+            ttsSpeaking = false
             actionInProgress = false
-            updateListeningNotification("Guri सुन रही है — अगली Reel command बोलें")
-            startRecognition()
-        }, 1500)
+            handler.postDelayed({ startRecognition() }, 700)
+            return
+        }
+        val utteranceId = "guri-${System.currentTimeMillis()}"
+        engine.speak(message, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+        // Recover if this device's TTS engine never reports completion.
+        handler.postDelayed({
+            if (ttsSpeaking && listening) {
+                ttsSpeaking = false
+                actionInProgress = false
+                updateListeningNotification("Guri फिर से सुनने के लिए तैयार है")
+                startRecognition()
+            }
+        }, 8000)
     }
 
     override fun onInit(status: Int) {
-        if (status == TextToSpeech.SUCCESS) tts?.language = Locale("hi", "IN")
+        if (status == TextToSpeech.SUCCESS) {
+            tts?.language = Locale("hi", "IN")
+            tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {}
+                override fun onError(utteranceId: String?) { onDone(utteranceId) }
+                override fun onDone(utteranceId: String?) {
+                    handler.post {
+                        if (!listening) return@post
+                        ttsSpeaking = false
+                        actionInProgress = false
+                        updateListeningNotification("Guri सुन रही है — अगली command बोलें")
+                        handler.postDelayed({ startRecognition() }, 650)
+                    }
+                }
+            })
+        }
     }
 
     override fun onDestroy() {
