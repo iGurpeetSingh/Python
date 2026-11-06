@@ -160,7 +160,24 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
             return
         }
 
-        if (asksInstagram || asksNext) {
+        if (asksNext && !asksInstagram) {
+            val service = AgentAccessibilityService.instance
+            if (service == null) {
+                speak("फोन कंट्रोल चालू नहीं है। Guri की Accessibility अनुमति चालू करें।")
+                return
+            }
+            actionInProgress = true
+            try { recognizer?.cancel() } catch (_: Exception) {}
+            val accepted = service.swipeCurrentFeed(1) { completed ->
+                handler.post {
+                    speak(if (completed) "एक बार scroll कर दिया।" else "इस स्क्रीन पर scroll नहीं हो पाया।")
+                }
+            }
+            if (!accepted) speak("कोई active app screen नहीं मिली।")
+            return
+        }
+
+        if (asksInstagram) {
             handleInstagramCommand(asksNext)
             return
         }
@@ -206,7 +223,7 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
                 speak("Instagram खुला नहीं मिला। स्क्रीन पर Instagram लाकर दोबारा बोलें।")
                 return@postDelayed
             }
-            val reelsOpened = service.openReelsTab()
+            val reelsOpened = if (alreadyOpen) true else service.openReelsTab()
             if (!reelsOpened) {
                 speak("Instagram खुल गया, लेकिन Reels tab नहीं मिला।")
                 return@postDelayed
