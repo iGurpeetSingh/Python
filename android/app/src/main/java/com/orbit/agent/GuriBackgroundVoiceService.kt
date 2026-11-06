@@ -181,12 +181,44 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
             handleInstagramCommand(asksNext)
             return
         }
+
+        val installedApp = resolveInstalledApp(normalized)
+        if (installedApp != null) {
+            val launch = packageManager.getLaunchIntentForPackage(installedApp.second)
+            if (launch != null) {
+                actionInProgress = true
+                try {
+                    launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    startActivity(launch)
+                    speak("${installedApp.first} खोल दिया है।")
+                } catch (_: Exception) {
+                    speak("${installedApp.first} नहीं खुल पाया।")
+                }
+            } else {
+                handler.postDelayed({ startRecognition() }, 350)
+            }
+            return
+        }
+
         if (whatsAppAwaitingContact && (normalized.contains("चैट") || normalized.contains("chat") || normalized.contains("नाम"))) {
             handleWhatsAppCommand(normalized)
             return
         }
 
         handler.postDelayed({ startRecognition() }, 350)
+    }
+
+    private fun resolveInstalledApp(command: String): Pair<String, String>? {
+        val launchIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        return packageManager.queryIntentActivities(launchIntent, 0)
+            .mapNotNull { info ->
+                val label = info.loadLabel(packageManager)?.toString()?.trim().orEmpty()
+                val packageName = info.activityInfo?.packageName.orEmpty()
+                if (label.length < 2 || packageName.isBlank()) null
+                else if (command.contains(label, ignoreCase = true)) label to packageName
+                else null
+            }
+            .maxByOrNull { it.first.length }
     }
 
     private fun handleInstagramCommand(shouldScroll: Boolean) {
