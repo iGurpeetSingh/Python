@@ -145,12 +145,16 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
             .replace("गुरि", "गुरी")
             .replace("गुरू", "गुरी")
             .replace("गुरु", "गुरी")
+            .replace("गोरी", "गुरी")
+            .replace("गौरी", "गुरी")
+            .replace("gori", "guri")
+            .replace("gauri", "guri")
             .replace("गुरूजी", "गुरी")
             .replace("गुरुजी", "गुरी")
         val hasWakeWord = normalized.contains("गुरी") || normalized.contains("guri")
         val asksNext = listOf("अगली", "अगला", "फिर स्क्रॉल", "फिर स्क्रोल", "रील को स्क्रॉल", "रील को स्क्रोल", "रील स्क्रॉल",
             "रील स्क्रोल", "रील स्क्रॉल करो", "रील स्क्रोल करो", "री स्क्रॉल", "री स्क्रोल",
-            "रीस्क्रॉल", "रीस्क्रोल", "स्क्रॉल करो", "स्क्रोल करो", "स्क्रॉल", "स्क्रोल", "next reel", "scroll up", "swipe up", "reel scroll")
+            "रीस्क्रॉल", "रीस्क्रोल", "स्क्रॉल करो", "स्क्रोल करो", "स्क्रॉल", "स्क्रोल", "वीडियो स्क्रॉल", "वीडियो स्क्रोल", "वीडियो को स्क्रॉल", "वीडियो को स्क्रोल", "video scroll", "scroll video", "next reel", "scroll up", "swipe up", "reel scroll")
             .any { normalized.contains(it) }
         if (!hasWakeWord) {
             updateListeningNotification("आवाज़ मिली, Guri नाम नहीं पहचाना: " + normalized.take(70))
