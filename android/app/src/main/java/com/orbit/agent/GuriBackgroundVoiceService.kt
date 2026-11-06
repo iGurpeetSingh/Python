@@ -63,8 +63,8 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun startBackgroundListening() {
-        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) return
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) return
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) { updateListeningNotification("Microphone permission नहीं मिली"); return }
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) { updateListeningNotification("Speech Recognition उपलब्ध नहीं है"); return }
         listening = true
         actionInProgress = false
         updateListeningNotification("Guri सुन रही है — Instagram Reel command बोलें")
@@ -97,8 +97,8 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
         if (recognizer != null) return true
         recognizer = SpeechRecognizer.createSpeechRecognizer(this).also { speech ->
             speech.setRecognitionListener(object : RecognitionListener {
-                override fun onReadyForSpeech(params: Bundle?) {}
-                override fun onBeginningOfSpeech() {}
+                override fun onReadyForSpeech(params: Bundle?) { updateListeningNotification("Guri सुन रही है — बोलिए") }
+                override fun onBeginningOfSpeech() { updateListeningNotification("Guri आपकी आवाज़ सुन रही है…") }
                 override fun onRmsChanged(rmsdB: Float) {}
                 override fun onBufferReceived(buffer: ByteArray?) {}
                 override fun onEndOfSpeech() {}
