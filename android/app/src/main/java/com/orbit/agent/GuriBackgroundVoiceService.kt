@@ -4,12 +4,16 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -29,6 +33,25 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
     private var actionInProgress = false
     private var whatsAppAwaitingContact = false
     @Volatile private var ttsSpeaking = false
+    @Volatile private var screenInteractive = true
+
+    private val screenStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                Intent.ACTION_SCREEN_OFF -> {
+                    screenInteractive = false
+                    resetRecognizer()
+                    updateListeningNotification("फोन लॉक है — स्क्रीन चालू होने पर Guri फिर सुनेगी")
+                }
+                Intent.ACTION_SCREEN_ON -> {
+                    screenInteractive = true
+                    if (listening && !actionInProgress && !ttsSpeaking) {
+                        handler.postDelayed({ startRecognition() }, 500)
+                    }
+                }
+            }
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -39,6 +62,17 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
+        val screenFilter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+        }
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(screenStateReceiver, screenFilter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(screenStateReceiver, screenFilter)
+        }
+        screenInteractive = getSystemService(PowerManager::class.java).isInteractive
         tts = TextToSpeech(this, this)
     }
 
@@ -69,7 +103,11 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
         if (!SpeechRecognizer.isRecognitionAvailable(this)) { updateListeningNotification("Speech Recognition उपलब्ध नहीं है"); return }
         listening = true
         actionInProgress = false
-        updateListeningNotification("Guri सुन रही है — Instagram Reel command बोलें")
+        screenInteractive = getSystemService(PowerManager::class.java).isInteractive
+        updateListeningNotification(
+            if (screenInteractive) "Guri सुन रही है — Instagram Reel command बोलें"
+            else "फोन लॉक है — स्क्रीन चालू होने पर Guri सुनेगी"
+        )
         startRecognition()
     }
 
@@ -105,7 +143,7 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
                 override fun onBufferReceived(buffer: ByteArray?) {}
                 override fun onEndOfSpeech() {}
                 override fun onError(error: Int) {
-                    if (!listening || actionInProgress || ttsSpeaking) return
+                    if (!listening || actionInProgress || ttsSpeaking || !screenInteractive) return
                     resetRecognizer()
                     handler.postDelayed({ startRecognition() },
                         if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 1400 else 700)
@@ -131,7 +169,8 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun startRecognition() {
-        if (!listening || actionInProgress || ttsSpeaking) return
+        if (!listening || actionInProgress || ttsSpeaking || !screenInteractive ||
+            !getSystemService(PowerManager::class.java).isInteractive) return
         if (recognizer != null) resetRecognizer()
         if (!ensureRecognizer()) return
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -193,12 +232,10 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
             if (!locked) {
                 speak("फोन लॉक नहीं हो पाया। Accessibility Service की अनुमति जाँचें।")
             } else {
-                // Give Android time to turn the display off, then resume listening
-                // when the device permits microphone use again.
-                handler.postDelayed({
-                    actionInProgress = false
-                    if (listening) startRecognition()
-                }, 1200)
+                // Do not reopen the microphone while the display is turning off.
+                // ACTION_SCREEN_ON will restart recognition after the user wakes the phone.
+                actionInProgress = false
+                screenInteractive = getSystemService(PowerManager::class.java).isInteractive
             }
             return
         }
@@ -469,6 +506,7 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
 
     override fun onDestroy() {
         stopBackgroundListening()
+        try { unregisterReceiver(screenStateReceiver) } catch (_: Exception) {}
         recognizer?.destroy()
         recognizer = null
         tts?.shutdown()
