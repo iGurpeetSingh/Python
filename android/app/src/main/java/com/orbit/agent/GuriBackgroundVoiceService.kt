@@ -461,17 +461,22 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun extractContactOccurrence(command: String): Int {
+        val spoken = listOf(
+            Regex("(?:zero|ज़ीरो|जीरो|शून्य)\\s+(?:zero|ज़ीरो|जीरो|शून्य)\\s+(one|एक)\\b", RegexOption.IGNORE_CASE) to 1,
+            Regex("(?:zero|ज़ीरो|जीरो|शून्य)\\s+(?:zero|ज़ीरो|जीरो|शून्य)\\s+(two|दो)\\b", RegexOption.IGNORE_CASE) to 2,
+            Regex("(?:zero|ज़ीरो|जीरो|शून्य)\\s+(?:zero|ज़ीरो|जीरो|शून्य)\\s+(three|तीन)\\b", RegexOption.IGNORE_CASE) to 3
+        )
+        spoken.firstOrNull { it.first.containsMatchIn(command) }?.let { return it.second }
         val match = Regex("(?:zero|ज़ीरो|जीरो|शून्य)?\\s*(?:00)?([1-9])\\b", RegexOption.IGNORE_CASE)
             .find(command) ?: return 1
-        val value = match.groupValues[1].toIntOrNull() ?: 1
-        return value.coerceIn(1, 9)
+        return (match.groupValues[1].toIntOrNull() ?: 1).coerceIn(1, 9)
     }
 
     private fun extractWhatsAppRecipient(command: String): String? {
         var source = command
             .replace(Regex("whatsapp|what's app|व्हाट्सएप|व्हाट्स ऐप|वाट्सएप", RegexOption.IGNORE_CASE), " ")
             .replace(Regex("गुरी|गुरि|गुरू|\\bguri\\b", RegexOption.IGNORE_CASE), " ")
-            .replace(Regex("(?:sumit|सुमित)\\s*(?:zero|ज़ीरो|जीरो|शून्य)?\\s*00[1-9]", RegexOption.IGNORE_CASE), " ")
+            .replace(Regex("(?:sumit|सुमित)\\s*(?:(?:zero|ज़ीरो|जीरो|शून्य)\\s+){0,2}(?:00[1-9]|one|two|three|एक|दो|तीन)", RegexOption.IGNORE_CASE), " ")
             .replace(Regex("\\s+"), " ").trim()
         val patterns = listOf(
             Regex("([\\p{L}][\\p{L}0-9 .'-]{0,28}?)\\s+(?:को|के नाम से|नाम से|नाम की)\\s*(?=(?:मैसेज|message|संदेश|chat|चैट|को|पर|पे))", RegexOption.IGNORE_CASE),
