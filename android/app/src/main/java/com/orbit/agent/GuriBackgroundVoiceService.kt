@@ -525,6 +525,7 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
         val key = firstName.lowercase(Locale.ROOT).replace(Regex("[^a-z]"), "")
         val common = mapOf(
             "pradeep" to listOf("pradeep", "pardeep", "pradip", "pardip"),
+            "pradip" to listOf("pradip", "pradeep", "pardeep", "pardip"),
             "pardeep" to listOf("pardeep", "pradeep", "pardip", "pradip"),
             "sumeet" to listOf("sumeet", "sumit"),
             "sumit" to listOf("sumit", "sumeet"),
@@ -533,7 +534,8 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
             "mohit" to listOf("mohit", "mohith"),
             "rahul" to listOf("rahul")
         )
-        return common[key] ?: listOf(firstName)
+        val withoutFinalSchwa = key.removeSuffix("a")
+        return common[key] ?: common[withoutFinalSchwa] ?: listOf(firstName, withoutFinalSchwa).distinct()
     }
 
     private fun toRomanContactQuery(value: String): String {
@@ -543,12 +545,19 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
         } catch (_: Exception) {
             cleaned
         }
-        return roman
+        val normalized = roman
             .replace(Regex("[^A-Za-z0-9 .'-]"), " ")
             .replace(Regex("\\s+"), " ")
             .trim()
             .lowercase(Locale.ROOT)
-            .replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
+        val tokens = normalized.split(Regex("\\s+")).filter { it.isNotBlank() }
+        val adjusted = if (cleaned.any { it.code in 0x0900..0x097F }) {
+            // ICU commonly preserves the Devanagari inherent final schwa; contact spellings often omit it.
+            tokens.map { if (it.length > 3) it.removeSuffix("a") else it }
+        } else tokens
+        return adjusted.joinToString(" ").replaceFirstChar {
+            if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString()
+        }
     }
 
     private fun handleWhatsAppMatches(
@@ -589,7 +598,11 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
             "चैट", "chat", "मैसेज", "message", "संदेश", "लिखो", "लिखना",
             "भेजो", "send", "सेंड", "करो", "कर", "को", "की", "का", "के",
             "पर", "पे", "में", "उसमें", "है", "हैं", "एक", "और", "फिर",
-            "नाम", "से", "हाय", "हाई", "hi", "please", "करदो"
+            "नाम", "से", "हाय", "हाई", "hi", "please", "करदो",
+            "kholo", "khol", "open", "chat", "message", "msg", "likho", "likhna",
+            "bhejo", "bhej", "bhejdo", "karo", "kar", "ko", "ki", "ka", "ke",
+            "mein", "me", "usme", "usmein", "par", "pe", "hai", "hain", "naam",
+            "se", "aur", "phir", "guri", "gori", "gauri", "whatsapp"
         )
         val tokens = Regex("[\\p{L}\\p{N}]+(?:['.-][\\p{L}\\p{N}]+)*")
             .findAll(command.lowercase(Locale.ROOT))
