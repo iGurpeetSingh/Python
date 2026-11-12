@@ -260,22 +260,27 @@ class AgentAccessibilityService : AccessibilityService() {
     /** Types into the app's search field, preferring fields whose hint or resource id says search. */
     fun typeIntoSearchField(value: String): Boolean {
         val root = rootInActiveWindow ?: return false
+        if (root.packageName?.toString() != "com.whatsapp") {
+            root.recycle()
+            return false
+        }
         val nodes = mutableListOf<AccessibilityNodeInfo>()
         collectEditableNodes(root, nodes, 0)
         root.recycle()
-        if (nodes.isEmpty()) return false
         val target = nodes.firstOrNull { node ->
             val hint = node.hintText?.toString()?.lowercase(Locale.ROOT).orEmpty()
             val id = node.viewIdResourceName?.lowercase(Locale.ROOT).orEmpty()
-            node.isVisibleToUser && node.isEnabled && (hint.contains("search") || id.contains("search"))
-        } ?: nodes.firstOrNull { it.isVisibleToUser && it.isEnabled }
+            node.isVisibleToUser && node.isEnabled &&
+                (hint.contains("search") || hint.contains("खोज") ||
+                 id.contains("search") || id.contains("search_src_text"))
+        }
         nodes.filter { it !== target }.forEach { it.recycle() }
         if (target == null) return false
         val args = android.os.Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value)
         }
         val focused = target.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-        val changed = target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        val changed = focused && target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
         target.recycle()
         return changed
     }
@@ -350,6 +355,10 @@ class AgentAccessibilityService : AccessibilityService() {
     /** Selects only a visible WhatsApp search result matching the requested contact name. */
     fun clickContactSearchResult(name: String, occurrence: Int = 1): Boolean {
         val root = rootInActiveWindow ?: return false
+        if (root.packageName?.toString() != "com.whatsapp") {
+            root.recycle()
+            return false
+        }
         val matches = mutableListOf<AccessibilityNodeInfo>()
         collectContactMatches(root, matches, name.trim().lowercase(Locale.ROOT), 0)
         root.recycle()
@@ -382,8 +391,7 @@ class AgentAccessibilityService : AccessibilityService() {
         if (depth > 20 || query.isBlank()) return
         val text = node.text?.toString()?.trim()?.lowercase(Locale.ROOT).orEmpty()
         val desc = node.contentDescription?.toString()?.trim()?.lowercase(Locale.ROOT).orEmpty()
-        val matches = text == query || text.startsWith("$query ") ||
-            desc == query || desc.startsWith("$query ")
+        val matches = text == query || desc == query
         if (matches && node.isVisibleToUser) out.add(AccessibilityNodeInfo.obtain(node))
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
