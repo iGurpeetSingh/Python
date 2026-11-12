@@ -188,7 +188,7 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "hi-IN")
             putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, false)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
         }
         try { recognizer?.startListening(intent) }
         catch (_: Exception) { handler.postDelayed({ startRecognition() }, 1000) }
