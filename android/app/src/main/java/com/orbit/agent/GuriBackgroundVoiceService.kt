@@ -34,6 +34,8 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
     private var actionInProgress = false
     private var whatsAppAwaitingContact = false
     private var whatsAppAwaitingChoice = false
+    private var whatsAppAwaitingConfirmation = false
+    private var whatsAppPendingConfirmationName: String? = null
     private var whatsAppPendingMatches: List<String> = emptyList()
     @Volatile private var ttsSpeaking = false
     @Volatile private var screenInteractive = true
@@ -153,9 +155,13 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
                 }
                 override fun onResults(results: Bundle?) {
                     if (!listening || actionInProgress) return
-                    val phrase = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
+                    val alternatives = results
+                        ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        ?.map { it.trim() }
+                        ?.filter { it.isNotBlank() }
+                        .orEmpty()
                     resetRecognizer()
-                    handleBackgroundCommand(phrase)
+                    handleBackgroundCommand(alternatives.firstOrNull().orEmpty(), alternatives)
                 }
                 override fun onPartialResults(partialResults: Bundle?) {}
                 override fun onEvent(eventType: Int, params: Bundle?) {}
@@ -188,7 +194,7 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
         catch (_: Exception) { handler.postDelayed({ startRecognition() }, 1000) }
     }
 
-    private fun handleBackgroundCommand(raw: String) {
+    private fun handleBackgroundCommand(raw: String, alternatives: List<String> = listOf(raw)) {
         val normalized = raw.lowercase(Locale.ROOT)
             .replace("गुरि", "गुरी")
             .replace("गुरू", "गुरी")
@@ -204,7 +210,8 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
             "रील स्क्रोल", "रील स्क्रॉल करो", "रील स्क्रोल करो", "री स्क्रॉल", "री स्क्रोल",
             "रीस्क्रॉल", "रीस्क्रोल", "स्क्रॉल करो", "स्क्रोल करो", "स्क्रॉल", "स्क्रोल", "वीडियो स्क्रॉल", "वीडियो स्क्रोल", "वीडियो को स्क्रॉल", "वीडियो को स्क्रोल", "video scroll", "scroll video", "next reel", "scroll up", "swipe up", "reel scroll")
             .any { normalized.contains(it) }
-        if (!hasWakeWord) {
+        val isWhatsAppFollowUp = whatsAppAwaitingContact || whatsAppAwaitingChoice || whatsAppAwaitingConfirmation
+        if (!hasWakeWord && !isWhatsAppFollowUp) {
             updateListeningNotification("आवाज़ मिली, Guri नाम नहीं पहचाना: " + normalized.take(70))
             handler.postDelayed({ startRecognition() }, 350)
             return
@@ -246,8 +253,8 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
         val asksInstagram = listOf("instagram", "insta", "इंस्टाग्राम", "इंस्टा ग्राम", "इंस्टा").any { normalized.contains(it) }
         val asksWhatsApp = listOf("व्हाट्सएप", "व्हाट्स ऐप", "वाट्सएप", "whatsapp", "what's app").any { normalized.contains(it) }
 
-        if (asksWhatsApp || whatsAppAwaitingContact || whatsAppAwaitingChoice) {
-            handleWhatsAppCommand(normalized)
+        if (asksWhatsApp || isWhatsAppFollowUp) {
+            handleWhatsAppCommand(normalized, alternatives.map { it.lowercase(Locale.ROOT) })
             return
         }
 
@@ -379,26 +386,44 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
         }, if (alreadyOpen) 250 else 1800)
     }
 
-    private fun handleWhatsAppCommand(command: String) {
+    private fun handleWhatsAppCommand(command: String, recognitionCandidates: List<String> = listOf(command)) {
         val service = AgentAccessibilityService.instance
         if (service == null) {
             speak("फोन कंट्रोल चालू नहीं है। Guri की Accessibility अनुमति चालू करें।")
             return
         }
 
-        // A follow-up voice reply selects one of the names Guri just read aloud.
+        val spoken = (recognitionCandidates + command).map { it.trim() }.filter { it.isNotBlank() }
+
+        if (whatsAppAwaitingConfirmation) {
+            val answer = spoken.joinToString(" ").lowercase(Locale.ROOT)
+            val pending = whatsAppPendingConfirmationName
+            val saysYes = listOf("हाँ", "हां", "जी हाँ", "जी हां", "yes", "yeah", "haan", "han", "sahi", "सही").any { answer.contains(it) }
+            val saysNo = listOf("नहीं", "नही", "ना", "no", "nope", "galat", "गलत").any { answer.contains(it) }
+            if (saysYes && !saysNo && !pending.isNullOrBlank()) {
+                whatsAppAwaitingConfirmation = false
+                whatsAppPendingConfirmationName = null
+                openWhatsAppMatchAndSend(service, pending)
+            } else if (saysNo) {
+                whatsAppAwaitingConfirmation = false
+                whatsAppPendingConfirmationName = null
+                whatsAppAwaitingContact = true
+                speak("ठीक है। सही contact का नाम दोबारा बताइए।")
+            } else {
+                speak("कृपया हाँ या नहीं में बताइए। क्या " + pending + " सही contact है?")
+            }
+            return
+        }
+
         if (whatsAppAwaitingChoice) {
-            val spokenChoice = extractWhatsAppRecipient(command)
-                ?.trim()
-                ?.trimEnd('.', ',', '।')
-                .orEmpty()
-            val selectedName = whatsAppPendingMatches.firstOrNull {
-                it.equals(spokenChoice, ignoreCase = true)
-            } ?: whatsAppPendingMatches.singleOrNull {
-                it.startsWith(spokenChoice, ignoreCase = true) && spokenChoice.isNotBlank()
+            val spokenChoices = spoken.mapNotNull { extractWhatsAppRecipient(it) }
+            val selectedName = whatsAppPendingMatches.firstOrNull { candidate ->
+                spokenChoices.any { it.equals(candidate, ignoreCase = true) }
+            } ?: whatsAppPendingMatches.singleOrNull { candidate ->
+                spokenChoices.any { it.equals(candidate.substringBeforeLast(" ", candidate), ignoreCase = true) }
             }
             if (selectedName == null) {
-                speak("यह नाम साफ़ नहीं मिला। कृपया पूरा नाम बोलें: " + whatsAppPendingMatches.take(5).joinToString(" या "))
+                speak("यह नाम साफ़ नहीं मिला। कृपया पूरा नाम बोलें: " + whatsAppPendingMatches.take(6).joinToString(" या "))
                 return
             }
             whatsAppAwaitingChoice = false
@@ -407,7 +432,9 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
             return
         }
 
-        val recipient = extractWhatsAppRecipient(command)
+        val recipients = spoken.mapNotNull { extractWhatsAppRecipient(it) }
+            .distinctBy { it.lowercase(Locale.ROOT) }
+        val recipient = recipients.firstOrNull()
         actionInProgress = true
         val launch = packageManager.getLaunchIntentForPackage("com.whatsapp")
         if (launch == null) {
@@ -436,122 +463,134 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
             }
 
             whatsAppAwaitingContact = false
-            updateListeningNotification("WhatsApp में $recipient खोज रही हूँ")
+            val romanNames = recipients.map { toRomanContactQuery(it) }.filter { it.isNotBlank() }
+            val queries = buildList {
+                romanNames.forEach { add(it) }
+                romanNames.forEach { name ->
+                    val firstName = name.split(Regex("\\s+")).firstOrNull().orEmpty()
+                    if (firstName.isNotBlank()) addAll(contactSpellingVariants(firstName))
+                }
+            }.distinctBy { it.lowercase(Locale.ROOT) }
+
+            updateListeningNotification("WhatsApp में " + recipient + " खोज रही हूँ")
             service.clickVisibleLabel("search", "Search", "Search chats", "खोजें", "खोज", "Search contacts")
             handler.postDelayed({
                 if (!service.isPackageForeground("com.whatsapp")) {
                     speak("WhatsApp की स्क्रीन बदल गई।")
                     return@postDelayed
                 }
-                val romanRecipient = toRomanContactQuery(recipient)
-                if (!service.typeIntoSearchField(romanRecipient)) {
-                    speak("WhatsApp की Search field नहीं मिली।")
-                    return@postDelayed
-                }
-                handler.postDelayed({
-                    if (!service.isPackageForeground("com.whatsapp")) {
-                        speak("WhatsApp की स्क्रीन बदल गई; contact नहीं खोला।")
-                        return@postDelayed
-                    }
-                    val matches = service.findContactSearchResults(romanRecipient)
-                    if (matches.isEmpty() && romanRecipient.isNotBlank()) {
-                        val initial = romanRecipient.first().toString()
-                        service.typeIntoSearchField(initial)
-                        handler.postDelayed({
-                            if (!service.isPackageForeground("com.whatsapp")) return@postDelayed
-                            handleWhatsAppMatches(service, recipient, service.findContactSearchResults(initial))
-                        }, 700)
-                    } else {
-                        handleWhatsAppMatches(service, recipient, matches)
-                    }
-                }, 900)
+                searchWhatsAppQueries(service, recipient, queries, 0)
             }, 700)
         }, 1100)
     }
 
-    /** Convert Hindi-script contact names to Latin text for WhatsApp's English contact index. */
+    private fun searchWhatsAppQueries(
+        service: AgentAccessibilityService,
+        requestedName: String,
+        queries: List<String>,
+        index: Int
+    ) {
+        if (index >= queries.size) {
+            speak(requestedName + " नाम से कोई भरोसेमंद matching chat नहीं मिली। कृपया नाम दोबारा बोलें।")
+            whatsAppAwaitingContact = true
+            return
+        }
+        val query = queries[index]
+        if (!service.isPackageForeground("com.whatsapp")) {
+            speak("WhatsApp की स्क्रीन बदल गई; search रोक दी।")
+            return
+        }
+        if (!service.typeIntoSearchField(query)) {
+            speak("WhatsApp की Search field नहीं मिली।")
+            return
+        }
+        handler.postDelayed({
+            if (!service.isPackageForeground("com.whatsapp")) return@postDelayed
+            val matches = service.findContactSearchResults(query)
+            if (matches.isEmpty()) {
+                searchWhatsAppQueries(service, requestedName, queries, index + 1)
+            } else {
+                handleWhatsAppMatches(service, requestedName, query, matches)
+            }
+        }, 750)
+    }
+
+    private fun contactSpellingVariants(firstName: String): List<String> {
+        val key = firstName.lowercase(Locale.ROOT).replace(Regex("[^a-z]"), "")
+        val common = mapOf(
+            "pradeep" to listOf("pradeep", "pardeep", "pradip", "pardip"),
+            "pardeep" to listOf("pardeep", "pradeep", "pardip", "pradip"),
+            "sumeet" to listOf("sumeet", "sumit"),
+            "sumit" to listOf("sumit", "sumeet"),
+            "sahil" to listOf("sahil", "saahil"),
+            "saahil" to listOf("saahil", "sahil"),
+            "mohit" to listOf("mohit", "mohith"),
+            "rahul" to listOf("rahul")
+        )
+        return common[key] ?: listOf(firstName)
+    }
+
     private fun toRomanContactQuery(value: String): String {
         val cleaned = value.trim()
-        if (cleaned.none { it.code in 0x0900..0x097F }) return cleaned
-        return try {
-            Transliterator.getInstance("Devanagari-Latin; Latin-ASCII")
-                .transliterate(cleaned)
-                .replace(Regex("[^A-Za-z0-9 .'-]"), " ")
-                .replace(Regex("\\s+"), " ")
-                .trim()
+        val roman = if (cleaned.none { it.code in 0x0900..0x097F }) cleaned else try {
+            Transliterator.getInstance("Devanagari-Latin; Latin-ASCII").transliterate(cleaned)
         } catch (_: Exception) {
             cleaned
         }
+        return roman
+            .replace(Regex("[^A-Za-z0-9 .'-]"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .lowercase(Locale.ROOT)
+            .replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
     }
 
     private fun handleWhatsAppMatches(
         service: AgentAccessibilityService,
         requestedName: String,
+        searchedQuery: String,
         matches: List<String>
     ) {
+        val requested = normalizeContactName(toRomanContactQuery(requestedName))
+        val exact = matches.filter { normalizeContactName(it) == requested }
         when {
-            matches.isEmpty() -> speak("$requestedName नाम से कोई matching chat नहीं मिली।")
-            matches.size == 1 -> openWhatsAppMatchAndSend(service, matches.first())
+            exact.size == 1 -> openWhatsAppMatchAndSend(service, exact.first())
+            exact.size > 1 -> {
+                whatsAppPendingMatches = exact
+                whatsAppAwaitingChoice = true
+                speak("एक से अधिक exact chats मिली हैं। कौन-सी खोलूँ? " + exact.take(6).joinToString("। "))
+            }
+            matches.size == 1 -> {
+                whatsAppAwaitingConfirmation = true
+                whatsAppPendingConfirmationName = matches.first()
+                speak("मुझे " + searchedQuery + " से " + matches.first() + " नाम की मिलती-जुलती chat मिली है। क्या यही सही contact है?")
+            }
             else -> {
                 whatsAppPendingMatches = matches
                 whatsAppAwaitingChoice = true
-                val choices = matches.take(6).joinToString("। ")
-                speak("$requestedName नाम से ${matches.size} chats मिली हैं। इनमें से कौन-सी खोलूँ? $choices")
+                speak(searchedQuery + " से " + matches.size + " chats मिली हैं। कृपया पूरा नाम चुनें: " + matches.take(6).joinToString("। "))
             }
         }
     }
 
-    private fun openWhatsAppMatchAndSend(service: AgentAccessibilityService, fullName: String) {
-        if (!service.isPackageForeground("com.whatsapp")) {
-            speak("WhatsApp की स्क्रीन बदल गई; chat नहीं खोली।")
-            return
-        }
-        updateListeningNotification("$fullName की chat खोल रही हूँ")
-        val opened = service.clickContactSearchResult(fullName, 1)
-        if (!opened) {
-            speak("$fullName की chat नहीं खुल पाई।")
-            return
-        }
-        handler.postDelayed({
-            if (!service.isPackageForeground("com.whatsapp")) {
-                speak("WhatsApp chat active नहीं है; message नहीं भेजा।")
-                return@postDelayed
-            }
-            if (!service.typeMessageIntoComposer("Hi")) {
-                speak("Chat खुली, लेकिन message box verify नहीं हुआ। Message नहीं भेजा।")
-                return@postDelayed
-            }
-            handler.postDelayed({
-                if (!service.isPackageForeground("com.whatsapp")) {
-                    speak("Chat बदल गई; message नहीं भेजा।")
-                    return@postDelayed
-                }
-                val sent = service.clickWhatsAppSendButton()
-                speak(if (sent) "$fullName को WhatsApp पर Hi भेज दिया।"
-                      else "Hi लिखा गया, लेकिन WhatsApp का Send button नहीं मिला। Message नहीं भेजा।")
-            }, 500)
-        }, 900)
-    }
+    private fun normalizeContactName(value: String): String =
+        value.lowercase(Locale.ROOT).replace(Regex("[^\\p{L}\\p{N}]"), "")
 
     private fun extractWhatsAppRecipient(command: String): String? {
-        var source = command
-            .replace(Regex("whatsapp|what's app|व्हाट्सएप|व्हाट्स ऐप|वाट्सएप", RegexOption.IGNORE_CASE), " ")
-            .replace(Regex("गुरी|गुरि|गुरू|\\bguri\\b", RegexOption.IGNORE_CASE), " ")
-            .replace(Regex("^(?:(?:खोलो|ओपन करो|open|launch|और|फिर|सर्च करो|search)\\s*)+", RegexOption.IGNORE_CASE), " ")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-
-        // Prefer the phrase explicitly marked as the contact name.
-        val marked = Regex("([\\p{L}][\\p{L}0-9 .'-]{0,40}?)\\s+(?:के नाम से|नाम से|के नाम पर)", RegexOption.IGNORE_CASE)
-            .find(source)?.groupValues?.getOrNull(1)?.trim()
-        if (!marked.isNullOrBlank()) return marked
-
-        source = source
-            .replace(Regex("^(?:में|पर|को)?\\s*(?:चैट|chat)\\s*", RegexOption.IGNORE_CASE), " ")
-            .replace(Regex("मैसेज|message|संदेश|लिखो|लिखना|भेजो|send|सेंड|करो|को|पर|पे|चैट|chat|में|ओपन|खोलो|open|hi|हाय|एक|और|उसमें|है|हैं|की|का", RegexOption.IGNORE_CASE), " ")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-        return source.takeIf { it.length >= 2 }
+        val stopWords = setOf(
+            "guri", "gori", "gauri", "whatsapp", "what's", "app",
+            "खोलो", "खोल", "ओपन", "ओपनकरो", "open", "launch",
+            "चैट", "chat", "मैसेज", "message", "संदेश", "लिखो", "लिखना",
+            "भेजो", "send", "सेंड", "करो", "कर", "को", "की", "का", "के",
+            "पर", "पे", "में", "उसमें", "है", "हैं", "एक", "और", "फिर",
+            "नाम", "से", "हाय", "हाई", "hi", "please", "करदो"
+        )
+        val tokens = Regex("[\\p{L}\\p{N}]+(?:['.-][\\p{L}\\p{N}]+)*")
+            .findAll(command.lowercase(Locale.ROOT))
+            .map { it.value }
+            .filter { it !in stopWords }
+            .toList()
+        return tokens.joinToString(" ").takeIf { it.length >= 2 }
     }
 
     private fun speak(message: String) {
