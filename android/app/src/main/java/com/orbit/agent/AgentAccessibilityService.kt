@@ -257,7 +257,69 @@ class AgentAccessibilityService : AccessibilityService() {
         return active
     }
 
-    /** Types into the app's search field, preferring fields whose hint or resource id says search. */
+    /**
+     * Opens WhatsApp's own Search control. First detect an already expanded search box;
+     * otherwise click a visible Search action by its label or resource id.
+     */
+    fun openWhatsAppSearch(): Boolean {
+        val root = rootInActiveWindow ?: return false
+        if (root.packageName?.toString() != "com.whatsapp") {
+            root.recycle()
+            return false
+        }
+        val editables = mutableListOf<AccessibilityNodeInfo>()
+        collectEditableNodes(root, editables, 0)
+        val alreadyOpen = editables.any { node ->
+            val hint = node.hintText?.toString()?.lowercase(Locale.ROOT).orEmpty()
+            val text = node.text?.toString()?.lowercase(Locale.ROOT).orEmpty()
+            val id = node.viewIdResourceName?.lowercase(Locale.ROOT).orEmpty()
+            node.isVisibleToUser && node.isEnabled &&
+                (hint.contains("search") || hint.contains("खोज") ||
+                 text == "search" || text == "खोजें" ||
+                 id.contains("search") || id.contains("search_src_text"))
+        }
+        editables.forEach { it.recycle() }
+        if (alreadyOpen) {
+            root.recycle()
+            return true
+        }
+
+        val candidates = mutableListOf<AccessibilityNodeInfo>()
+        collectWhatsAppSearchControls(root, candidates, 0)
+        root.recycle()
+        val target = candidates
+            .filter { it.isVisibleToUser && it.isEnabled }
+            .sortedByDescending { it.isClickable || it.isFocusable }
+            .firstOrNull()
+        candidates.filter { it !== target }.forEach { it.recycle() }
+        if (target == null) return false
+        val clicked = clickNode(target)
+        target.recycle()
+        return clicked
+    }
+
+    private fun collectWhatsAppSearchControls(
+        node: AccessibilityNodeInfo,
+        out: MutableList<AccessibilityNodeInfo>,
+        depth: Int
+    ) {
+        if (depth > 20) return
+        val text = node.text?.toString()?.lowercase(Locale.ROOT).orEmpty()
+        val desc = node.contentDescription?.toString()?.lowercase(Locale.ROOT).orEmpty()
+        val id = node.viewIdResourceName?.lowercase(Locale.ROOT).orEmpty()
+        val isSearch = text == "search" || desc == "search" ||
+            text == "खोजें" || desc == "खोजें" ||
+            text.contains("search chats") || desc.contains("search chats") ||
+            id.contains("menu_search") || id.contains("search")
+        if (node.isVisibleToUser && isSearch) out.add(AccessibilityNodeInfo.obtain(node))
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            collectWhatsAppSearchControls(child, out, depth + 1)
+            child.recycle()
+        }
+    }
+
+    /** Types only into a verified WhatsApp Search field, including AutoCompleteTextView variants. */
     fun typeIntoSearchField(value: String): Boolean {
         val root = rootInActiveWindow ?: return false
         if (root.packageName?.toString() != "com.whatsapp") {
@@ -269,18 +331,27 @@ class AgentAccessibilityService : AccessibilityService() {
         root.recycle()
         val target = nodes.firstOrNull { node ->
             val hint = node.hintText?.toString()?.lowercase(Locale.ROOT).orEmpty()
+            val text = node.text?.toString()?.lowercase(Locale.ROOT).orEmpty()
+            val desc = node.contentDescription?.toString()?.lowercase(Locale.ROOT).orEmpty()
             val id = node.viewIdResourceName?.lowercase(Locale.ROOT).orEmpty()
+            val className = node.className?.toString()?.lowercase(Locale.ROOT).orEmpty()
             node.isVisibleToUser && node.isEnabled &&
                 (hint.contains("search") || hint.contains("खोज") ||
-                 id.contains("search") || id.contains("search_src_text"))
+                 text == "search" || text == "खोजें" ||
+                 desc.contains("search") || desc.contains("खोज") ||
+                 id.contains("search") || id.contains("search_src_text") ||
+                 className.contains("autocompletetextview") && (hint.isNotBlank() || id.contains("search")))
         }
         nodes.filter { it !== target }.forEach { it.recycle() }
         if (target == null) return false
         val args = android.os.Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value)
         }
-        val focused = target.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-        val changed = focused && target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        // Some WhatsApp builds expose a clickable search field whose ACTION_FOCUS
+        // returns false even though ACTION_SET_TEXT is supported. Try both safely.
+        target.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+        target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        val changed = target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
         target.recycle()
         return changed
     }
