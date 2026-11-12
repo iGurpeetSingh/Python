@@ -36,6 +36,8 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
     private var whatsAppAwaitingChoice = false
     private var whatsAppAwaitingConfirmation = false
     private var whatsAppPendingConfirmationName: String? = null
+    private var whatsAppPendingMessage: String? = null
+    private var whatsAppPendingSend = false
     private var whatsAppPendingMatches: List<String> = emptyList()
     @Volatile private var ttsSpeaking = false
     @Volatile private var screenInteractive = true
@@ -435,6 +437,10 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
         val recipients = spoken.mapNotNull { extractWhatsAppRecipient(it) }
             .distinctBy { it.lowercase(Locale.ROOT) }
         val recipient = recipients.firstOrNull()
+        whatsAppPendingMessage = extractWhatsAppMessage(spoken)
+        whatsAppPendingSend = spoken.any { phrase ->
+            listOf("भेजो", "भेज दो", "भेज देना", "send", "send it").any { word -> phrase.contains(word) }
+        }
         actionInProgress = true
         val launch = packageManager.getLaunchIntentForPackage("com.whatsapp")
         if (launch == null) {
@@ -591,6 +597,56 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
             .filter { it !in stopWords }
             .toList()
         return tokens.joinToString(" ").takeIf { it.length >= 2 }
+    }
+
+    private fun extractWhatsAppMessage(candidates: List<String>): String? {
+        val text = candidates.joinToString(" ").lowercase(Locale.ROOT)
+        return when {
+            Regex("\\bhi\\b").containsMatchIn(text) || text.contains("हाय") || text.contains("हाई") -> "Hi"
+            text.contains("hello") || text.contains("हेलो") -> "Hello"
+            text.contains("नमस्ते") -> "नमस्ते"
+            else -> null
+        }
+    }
+
+    private fun openWhatsAppMatchAndSend(service: AgentAccessibilityService, fullName: String) {
+        if (!service.isPackageForeground("com.whatsapp")) {
+            speak("WhatsApp की स्क्रीन बदल गई; chat नहीं खोली।")
+            return
+        }
+        updateListeningNotification("$fullName की chat खोल रही हूँ")
+        if (!service.clickContactSearchResult(fullName, 1)) {
+            speak("$fullName की chat नहीं खुल पाई।")
+            return
+        }
+        handler.postDelayed({
+            if (!service.isPackageForeground("com.whatsapp")) {
+                speak("WhatsApp chat active नहीं है; कोई message नहीं लिखा।")
+                return@postDelayed
+            }
+            val message = whatsAppPendingMessage
+            if (message.isNullOrBlank()) {
+                speak("$fullName की chat खोल दी है।")
+                return@postDelayed
+            }
+            if (!service.typeMessageIntoComposer(message)) {
+                speak("Chat खुली, लेकिन message box verify नहीं हुआ।")
+                return@postDelayed
+            }
+            if (!whatsAppPendingSend) {
+                speak("$message लिख दिया है। भेजने के लिए अलग से 'भेज दो' बोलें।")
+                return@postDelayed
+            }
+            handler.postDelayed({
+                if (!service.isPackageForeground("com.whatsapp")) {
+                    speak("Chat बदल गई; message नहीं भेजा।")
+                    return@postDelayed
+                }
+                val sent = service.clickWhatsAppSendButton()
+                speak(if (sent) "$fullName को WhatsApp पर $message भेज दिया।"
+                      else "$message लिखा गया, लेकिन Send button नहीं मिला। Message नहीं भेजा।")
+            }, 500)
+        }, 900)
     }
 
     private fun speak(message: String) {
