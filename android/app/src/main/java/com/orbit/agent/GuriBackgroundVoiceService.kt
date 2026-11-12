@@ -503,20 +503,20 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
     private fun extractWhatsAppRecipient(command: String): String? {
         var source = command
             .replace(Regex("whatsapp|what's app|व्हाट्सएप|व्हाट्स ऐप|वाट्सएप", RegexOption.IGNORE_CASE), " ")
-            .replace(Regex("गुरी|गुरि|गुरू|\\\\bguri\\\\b", RegexOption.IGNORE_CASE), " ")
-            .replace(Regex("^(?:खोलो|ओपन करो|open|launch|और|फिर|सर्च करो|search)\\\\s*", RegexOption.IGNORE_CASE), " ")
-            .replace(Regex("\\\\s+"), " ")
+            .replace(Regex("गुरी|गुरि|गुरू|\\bguri\\b", RegexOption.IGNORE_CASE), " ")
+            .replace(Regex("^(?:(?:खोलो|ओपन करो|open|launch|और|फिर|सर्च करो|search)\\s*)+", RegexOption.IGNORE_CASE), " ")
+            .replace(Regex("\\s+"), " ")
             .trim()
 
         // Prefer the phrase explicitly marked as the contact name.
-        val marked = Regex("([\\\\p{L}][\\\\p{L}0-9 .'-]{0,40}?)\\\\s+(?:के नाम से|नाम से|के नाम पर)", RegexOption.IGNORE_CASE)
+        val marked = Regex("([\\p{L}][\\p{L}0-9 .'-]{0,40}?)\\s+(?:के नाम से|नाम से|के नाम पर)", RegexOption.IGNORE_CASE)
             .find(source)?.groupValues?.getOrNull(1)?.trim()
         if (!marked.isNullOrBlank()) return marked
 
         source = source
-            .replace(Regex("^(?:में|पर|को)?\\\\s*(?:चैट|chat)\\\\s*", RegexOption.IGNORE_CASE), " ")
+            .replace(Regex("^(?:में|पर|को)?\\s*(?:चैट|chat)\\s*", RegexOption.IGNORE_CASE), " ")
             .replace(Regex("मैसेज|message|संदेश|लिखो|लिखना|भेजो|send|सेंड|करो|को|पर|पे|चैट|chat|में|ओपन|खोलो|open|hi|हाय|एक|और|उसमें", RegexOption.IGNORE_CASE), " ")
-            .replace(Regex("\\\\s+"), " ")
+            .replace(Regex("\\s+"), " ")
             .trim()
         return source.takeIf { it.length >= 2 }
     }
