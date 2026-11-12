@@ -383,6 +383,7 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
             return
         }
         val recipient = extractWhatsAppRecipient(command)
+        val occurrence = extractContactOccurrence(command)
         actionInProgress = true
         val launch = packageManager.getLaunchIntentForPackage("com.whatsapp")
         if (launch == null) {
@@ -406,11 +407,11 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
             }
             if (recipient.isNullOrBlank()) {
                 whatsAppAwaitingContact = true
-                speak("WhatsApp खोल दिया है। अब chat का नाम बताइए।")
+                speak("WhatsApp खोल दिया है। किस contact को message भेजना है?")
                 return@postDelayed
             }
             whatsAppAwaitingContact = false
-            updateListeningNotification("WhatsApp में $recipient chat खोल रही हूँ")
+            updateListeningNotification("WhatsApp में $recipient खोज रही हूँ")
             val searchOpened = service.clickVisibleLabel(
                 "search", "Search", "Search chats", "खोजें", "खोज", "Search contacts"
             )
@@ -425,40 +426,66 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
                     return@postDelayed
                 }
                 handler.postDelayed({
-                    val chatOpened = service.clickVisibleLabel(recipient)
+                    if (!service.isPackageForeground("com.whatsapp")) {
+                        speak("WhatsApp की स्क्रीन बदल गई; contact नहीं खोला।")
+                        return@postDelayed
+                    }
+                    val chatOpened = service.clickContactSearchResult(recipient, occurrence)
                     if (!chatOpened) {
-                        speak("$recipient नाम की chat नहीं मिली।")
+                        speak("$recipient का matching contact नहीं मिला।")
                         return@postDelayed
                     }
                     handler.postDelayed({
-                        val drafted = service.typeMessageIntoComposer("Hi")
-                        if (drafted) {
-                            speak("$recipient की WhatsApp chat में Hi लिख दिया है। Send नहीं किया है।")
-                        } else {
-                            speak("Chat खुल गई, लेकिन message box नहीं मिला। Hi नहीं लिखा गया।")
+                        if (!service.isPackageForeground("com.whatsapp")) {
+                            speak("WhatsApp chat active नहीं है; message नहीं भेजा।")
+                            return@postDelayed
                         }
-                    }, 1100)
-                }, 1500)
+                        val drafted = service.typeMessageIntoComposer("Hi")
+                        if (!drafted) {
+                            speak("Chat खुली, लेकिन message box verify नहीं हुआ। Message नहीं भेजा।")
+                            return@postDelayed
+                        }
+                        handler.postDelayed({
+                            if (!service.isPackageForeground("com.whatsapp")) {
+                                speak("Chat बदल गई; message नहीं भेजा।")
+                                return@postDelayed
+                            }
+                            val sent = service.clickWhatsAppSendButton()
+                            speak(if (sent) "$recipient को WhatsApp पर Hi भेज दिया।"
+                                  else "Hi लिखा गया, लेकिन WhatsApp का Send button नहीं मिला। Message नहीं भेजा।")
+                        }, 500)
+                    }, 900)
+                }, 1200)
             }, if (searchOpened) 650 else 1000)
         }, 1200)
     }
 
+    private fun extractContactOccurrence(command: String): Int {
+        val match = Regex("(?:zero|ज़ीरो|जीरो|शून्य)?\\s*(?:00)?([1-9])\\b", RegexOption.IGNORE_CASE)
+            .find(command) ?: return 1
+        val value = match.groupValues[1].toIntOrNull() ?: 1
+        return value.coerceIn(1, 9)
+    }
+
     private fun extractWhatsAppRecipient(command: String): String? {
-        val source = command
+        var source = command
             .replace(Regex("whatsapp|what's app|व्हाट्सएप|व्हाट्स ऐप|वाट्सएप", RegexOption.IGNORE_CASE), " ")
             .replace(Regex("गुरी|गुरि|गुरू|\\bguri\\b", RegexOption.IGNORE_CASE), " ")
-            .replace(Regex("ओपन करो|open करो|खोलो|ओपन|open|जाओ|जाके|जाकर|उसमें|उसमें जाकर|उस चैट में|एक|है|चैट|chat|में|जाना|जाना है|जाकर|फिर|उसको|लिखो|लिखना|hi|हाय|send|सेंड|नहीं करना|मत भेजना|भेजना नहीं", RegexOption.IGNORE_CASE), " ")
+            .replace(Regex("(?:sumit|सुमित)\\s*(?:zero|ज़ीरो|जीरो|शून्य)?\\s*00[1-9]", RegexOption.IGNORE_CASE), " ")
             .replace(Regex("\\s+"), " ").trim()
         val patterns = listOf(
-            Regex("([\\p{L}][\\p{L}0-9 .'-]{0,24}?)\\s+के नाम से", RegexOption.IGNORE_CASE),
-            Regex("([\\p{L}][\\p{L}0-9 .'-]{0,24}?)\\s+नाम की", RegexOption.IGNORE_CASE),
-            Regex("नाम से\\s+([\\p{L}][\\p{L}0-9 .'-]{0,24})", RegexOption.IGNORE_CASE)
+            Regex("([\\p{L}][\\p{L}0-9 .'-]{0,28}?)\\s+(?:को|के नाम से|नाम से|नाम की)\\s*(?=(?:मैसेज|message|संदेश|chat|चैट|को|पर|पे))", RegexOption.IGNORE_CASE),
+            Regex("(?:मैसेज|message|संदेश)\\s+(?:करो|भेजो|लिखो)?\\s+([\\p{L}][\\p{L}0-9 .'-]{0,28})", RegexOption.IGNORE_CASE),
+            Regex("([\\p{L}][\\p{L}0-9 .'-]{0,28}?)\\s+(?:को|पे|पर)\\s+(?:मैसेज|message|संदेश)", RegexOption.IGNORE_CASE)
         )
         for (pattern in patterns) {
             val value = pattern.find(source)?.groupValues?.getOrNull(1)?.trim()
             if (!value.isNullOrBlank()) return value
         }
-        return null
+        source = source
+            .replace(Regex("मैसेज|message|संदेश|लिखो|लिखना|भेजो|send|सेंड|करो|को|पर|पे|चैट|chat|में|ओपन|खोलो|open|hi|हाय", RegexOption.IGNORE_CASE), " ")
+            .replace(Regex("\\s+"), " ").trim()
+        return source.takeIf { it.length >= 2 }
     }
 
     private fun speak(message: String) {
