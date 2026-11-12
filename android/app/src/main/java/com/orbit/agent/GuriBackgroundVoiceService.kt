@@ -170,6 +170,39 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
 
         updateListeningNotification("कमांड पहचानी: " + normalized.take(70))
 
+        // Handle screen locking before app-launch and scroll commands.
+        // Explicit unlock phrases are excluded so "लॉक खोलो" is never treated as a lock request.
+        val asksUnlock = listOf(
+            "unlock", "अनलॉक", "लॉक खोल", "लॉक ओपन", "फोन खोल", "फोन अनलॉक"
+        ).any { normalized.contains(it) }
+        val asksLock = !asksUnlock && listOf(
+            "फोन लॉक", "फोन को लॉक", "लॉक कर दो", "लॉक करो", "लॉक लगा",
+            "स्क्रीन लॉक", "screen lock", "lock phone", "lock the phone", "lock screen"
+        ).any { normalized.contains(it) }
+
+        if (asksLock) {
+            val service = AgentAccessibilityService.instance
+            if (service == null) {
+                speak("फोन लॉक नहीं हो पाया। Guri की Accessibility अनुमति चालू करें।")
+                return
+            }
+            actionInProgress = true
+            try { recognizer?.cancel() } catch (_: Exception) {}
+            updateListeningNotification("GORI फोन लॉक कर रही है")
+            val locked = service.lockPhoneScreen()
+            if (!locked) {
+                speak("फोन लॉक नहीं हो पाया। Accessibility Service की अनुमति जाँचें।")
+            } else {
+                // Give Android time to turn the display off, then resume listening
+                // when the device permits microphone use again.
+                handler.postDelayed({
+                    actionInProgress = false
+                    if (listening) startRecognition()
+                }, 1200)
+            }
+            return
+        }
+
         val asksInstagram = listOf("instagram", "insta", "इंस्टाग्राम", "इंस्टा ग्राम", "इंस्टा").any { normalized.contains(it) }
         val asksWhatsApp = listOf("व्हाट्सएप", "व्हाट्स ऐप", "वाट्सएप", "whatsapp", "what's app").any { normalized.contains(it) }
 
