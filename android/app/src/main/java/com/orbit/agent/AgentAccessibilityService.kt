@@ -394,6 +394,12 @@ class AgentAccessibilityService : AccessibilityService() {
     fun pressBack(): Boolean = performGlobalAction(GLOBAL_ACTION_BACK)
     fun pressHome(): Boolean = performGlobalAction(GLOBAL_ACTION_HOME)
 
+    /** Locks the device screen through Android's supported accessibility global action. */
+    fun lockPhoneScreen(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return false
+        return performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
+    }
+
     private fun handleCloudCommand(requestId: String, rawCommand: String) {
         val command = rawCommand.lowercase(Locale.ROOT)
         val hasInstagram = command.contains("instagram") || command.contains("इंस्टाग्राम")
