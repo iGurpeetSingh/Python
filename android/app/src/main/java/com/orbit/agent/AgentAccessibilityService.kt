@@ -305,6 +305,48 @@ class AgentAccessibilityService : AccessibilityService() {
         return focused && changed
     }
 
+    /**
+     * Returns unique visible WhatsApp search-result labels beginning with the spoken query.
+     * The caller must ask the user when more than one distinct label is present.
+     */
+    fun findContactSearchResults(query: String): List<String> {
+        val root = rootInActiveWindow ?: return emptyList()
+        if (root.packageName?.toString() != "com.whatsapp") {
+            root.recycle()
+            return emptyList()
+        }
+        val names = linkedSetOf<String>()
+        collectContactLabels(root, names, query.trim().lowercase(Locale.ROOT), 0)
+        root.recycle()
+        return names.toList().sortedBy { it.lowercase(Locale.ROOT) }
+    }
+
+    private fun collectContactLabels(
+        node: AccessibilityNodeInfo,
+        out: MutableSet<String>,
+        query: String,
+        depth: Int
+    ) {
+        if (depth > 20 || query.isBlank()) return
+        if (node.isVisibleToUser) {
+            val text = node.text?.toString()?.trim().orEmpty()
+            val description = node.contentDescription?.toString()?.trim().orEmpty()
+            val candidates = listOf(text, description).distinct()
+            candidates.forEach { label ->
+                if (label.isNotBlank() && label.lowercase(Locale.ROOT).startsWith(query)) {
+                    // Ignore multi-line preview text; keep the contact/chat title itself.
+                    val clean = label.lineSequence().firstOrNull()?.trim().orEmpty()
+                    if (clean.length >= query.length && clean.length <= 80) out.add(clean)
+                }
+            }
+        }
+        for (index in 0 until node.childCount) {
+            val child = node.getChild(index) ?: continue
+            collectContactLabels(child, out, query, depth + 1)
+            child.recycle()
+        }
+    }
+
     /** Selects only a visible WhatsApp search result matching the requested contact name. */
     fun clickContactSearchResult(name: String, occurrence: Int = 1): Boolean {
         val root = rootInActiveWindow ?: return false
