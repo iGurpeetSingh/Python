@@ -420,9 +420,12 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
         if (whatsAppAwaitingChoice) {
             val spokenChoices = spoken.mapNotNull { extractWhatsAppRecipient(it) }
             val selectedName = whatsAppPendingMatches.firstOrNull { candidate ->
-                spokenChoices.any { it.equals(candidate, ignoreCase = true) }
+                spokenChoices.any { normalizeContactName(it) == normalizeContactName(candidate) }
             } ?: whatsAppPendingMatches.singleOrNull { candidate ->
-                spokenChoices.any { it.equals(candidate.substringBeforeLast(" ", candidate), ignoreCase = true) }
+                spokenChoices.any {
+                    val spokenKey = normalizeContactName(it)
+                    spokenKey.isNotBlank() && normalizeContactName(candidate).startsWith(spokenKey)
+                }
             }
             if (selectedName == null) {
                 speak("यह नाम साफ़ नहीं मिला। कृपया पूरा नाम बोलें: " + whatsAppPendingMatches.take(6).joinToString(" या "))
