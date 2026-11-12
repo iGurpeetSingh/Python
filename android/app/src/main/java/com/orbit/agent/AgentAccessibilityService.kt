@@ -305,6 +305,96 @@ class AgentAccessibilityService : AccessibilityService() {
         return focused && changed
     }
 
+    /** Selects only a visible WhatsApp search result matching the requested contact name. */
+    fun clickContactSearchResult(name: String, occurrence: Int = 1): Boolean {
+        val root = rootInActiveWindow ?: return false
+        val matches = mutableListOf<AccessibilityNodeInfo>()
+        collectContactMatches(root, matches, name.trim().lowercase(Locale.ROOT), 0)
+        root.recycle()
+        val ordered = matches
+            .filter { it.isVisibleToUser && it.isEnabled }
+            .distinctBy { node ->
+                val bounds = android.graphics.Rect()
+                node.getBoundsInScreen(bounds)
+                "${node.text}:${bounds.top}:${bounds.left}"
+            }
+            .sortedBy {
+                val bounds = android.graphics.Rect()
+                it.getBoundsInScreen(bounds)
+                bounds.top
+            }
+        val selected = ordered.getOrNull((occurrence - 1).coerceAtLeast(0))
+        ordered.filter { it !== selected }.forEach { it.recycle() }
+        if (selected == null) return false
+        val clicked = clickNode(selected)
+        selected.recycle()
+        return clicked
+    }
+
+    private fun collectContactMatches(
+        node: AccessibilityNodeInfo,
+        out: MutableList<AccessibilityNodeInfo>,
+        query: String,
+        depth: Int
+    ) {
+        if (depth > 20 || query.isBlank()) return
+        val text = node.text?.toString()?.trim()?.lowercase(Locale.ROOT).orEmpty()
+        val desc = node.contentDescription?.toString()?.trim()?.lowercase(Locale.ROOT).orEmpty()
+        val matches = text == query || text.startsWith("$query ") ||
+            desc == query || desc.startsWith("$query ")
+        if (matches && node.isVisibleToUser) out.add(AccessibilityNodeInfo.obtain(node))
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            collectContactMatches(child, out, query, depth + 1)
+            child.recycle()
+        }
+    }
+
+    /** Clicks WhatsApp's explicit Send control; never taps a guessed screen coordinate. */
+    fun clickWhatsAppSendButton(): Boolean {
+        val root = rootInActiveWindow ?: return false
+        if (root.packageName?.toString() != "com.whatsapp") {
+            root.recycle()
+            return false
+        }
+        val matches = mutableListOf<AccessibilityNodeInfo>()
+        collectSendNodes(root, matches, 0)
+        root.recycle()
+        val target = matches
+            .filter { it.isVisibleToUser && it.isEnabled }
+            .maxByOrNull { node ->
+                val bounds = android.graphics.Rect()
+                node.getBoundsInScreen(bounds)
+                bounds.right
+            }
+        matches.filter { it !== target }.forEach { it.recycle() }
+        if (target == null) return false
+        val clicked = clickNode(target)
+        target.recycle()
+        return clicked
+    }
+
+    private fun collectSendNodes(
+        node: AccessibilityNodeInfo,
+        out: MutableList<AccessibilityNodeInfo>,
+        depth: Int
+    ) {
+        if (depth > 20) return
+        val text = node.text?.toString()?.trim()?.lowercase(Locale.ROOT).orEmpty()
+        val desc = node.contentDescription?.toString()?.trim()?.lowercase(Locale.ROOT).orEmpty()
+        val id = node.viewIdResourceName?.lowercase(Locale.ROOT).orEmpty()
+        if (node.isVisibleToUser &&
+            (text == "send" || desc == "send" || text == "भेजें" || desc == "भेजें" ||
+             id.contains("send"))) {
+            out.add(AccessibilityNodeInfo.obtain(node))
+        }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            collectSendNodes(child, out, depth + 1)
+            child.recycle()
+        }
+    }
+
     /** Opens a visible app by package name. */
     fun launchInstalledApp(packageName: String): Boolean {
         val launch = packageManager.getLaunchIntentForPackage(packageName) ?: return false
