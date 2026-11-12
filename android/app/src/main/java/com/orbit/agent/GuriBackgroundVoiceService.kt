@@ -482,14 +482,20 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
             }.distinctBy { it.lowercase(Locale.ROOT) }
 
             updateListeningNotification("WhatsApp में " + recipient + " खोज रही हूँ")
-            service.clickVisibleLabel("search", "Search", "Search chats", "खोजें", "खोज", "Search contacts")
+            if (!service.openWhatsAppSearch()) {
+                speak("WhatsApp का Search बटन नहीं खुल पाया। WhatsApp की Chats स्क्रीन पर दोबारा कोशिश करें।")
+                whatsAppAwaitingContact = true
+                return@postDelayed
+            }
+            // Allow WhatsApp's toolbar Search action to expand and attach its EditText
+            // before inspecting the accessibility tree for the actual search field.
             handler.postDelayed({
                 if (!service.isPackageForeground("com.whatsapp")) {
                     speak("WhatsApp की स्क्रीन बदल गई।")
                     return@postDelayed
                 }
                 searchWhatsAppQueries(service, recipient, queries, 0)
-            }, 700)
+            }, 550)
         }, 1100)
     }
 
