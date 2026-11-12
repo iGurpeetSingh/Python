@@ -365,7 +365,7 @@ class AgentAccessibilityService : AccessibilityService() {
             return false
         }
         val matches = mutableListOf<AccessibilityNodeInfo>()
-        collectContactMatches(root, matches, name.trim().lowercase(Locale.ROOT), 0)
+        collectContactMatches(root, matches, normalizeWhatsAppLabel(name), 0)
         root.recycle()
         val ordered = matches
             .filter { it.isVisibleToUser && it.isEnabled }
