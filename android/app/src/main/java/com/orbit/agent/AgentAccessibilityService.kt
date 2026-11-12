@@ -321,7 +321,8 @@ class AgentAccessibilityService : AccessibilityService() {
             return emptyList()
         }
         val names = linkedSetOf<String>()
-        collectContactLabels(root, names, query.trim().lowercase(Locale.ROOT), 0)
+        val normalizedQuery = normalizeWhatsAppLabel(query)
+        collectContactLabels(root, names, normalizedQuery, 0)
         root.recycle()
         return names.toList().sortedBy { it.lowercase(Locale.ROOT) }
     }
@@ -338,10 +339,11 @@ class AgentAccessibilityService : AccessibilityService() {
             val description = node.contentDescription?.toString()?.trim().orEmpty()
             val candidates = listOf(text, description).distinct()
             candidates.forEach { label ->
-                if (label.isNotBlank() && label.lowercase(Locale.ROOT).startsWith(query)) {
-                    // Ignore multi-line preview text; keep the contact/chat title itself.
+                if (label.isNotBlank()) {
+                    // Ignore preview lines and compare names without leading symbols/emojis.
                     val clean = label.lineSequence().firstOrNull()?.trim().orEmpty()
-                    if (clean.length >= query.length && clean.length <= 80) out.add(clean)
+                    val normalized = normalizeWhatsAppLabel(clean)
+                    if (normalized.isNotBlank() && normalized.startsWith(query) && clean.length <= 80) out.add(clean)
                 }
             }
         }
@@ -351,6 +353,9 @@ class AgentAccessibilityService : AccessibilityService() {
             child.recycle()
         }
     }
+
+    private fun normalizeWhatsAppLabel(value: String): String =
+        value.lowercase(Locale.ROOT).replace(Regex("[^\\p{L}\\p{N}]"), "")
 
     /** Selects only a visible WhatsApp search result matching the requested contact name. */
     fun clickContactSearchResult(name: String, occurrence: Int = 1): Boolean {
@@ -389,8 +394,8 @@ class AgentAccessibilityService : AccessibilityService() {
         depth: Int
     ) {
         if (depth > 20 || query.isBlank()) return
-        val text = node.text?.toString()?.trim()?.lowercase(Locale.ROOT).orEmpty()
-        val desc = node.contentDescription?.toString()?.trim()?.lowercase(Locale.ROOT).orEmpty()
+        val text = normalizeWhatsAppLabel(node.text?.toString()?.lineSequence()?.firstOrNull().orEmpty())
+        val desc = normalizeWhatsAppLabel(node.contentDescription?.toString()?.lineSequence()?.firstOrNull().orEmpty())
         val matches = text == query || desc == query
         if (matches && node.isVisibleToUser) out.add(AccessibilityNodeInfo.obtain(node))
         for (i in 0 until node.childCount) {
