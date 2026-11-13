@@ -309,6 +309,9 @@ class AgentAccessibilityService : AccessibilityService() {
                 val text = node.text?.toString()?.lowercase(Locale.ROOT).orEmpty()
                 val desc = node.contentDescription?.toString()?.lowercase(Locale.ROOT).orEmpty()
                 when {
+                    text.contains("ask meta ai") || desc.contains("ask meta ai") -> 130
+                    (text.contains("search") && (text.contains("meta ai") || text.contains("chats"))) ||
+                        (desc.contains("search") && (desc.contains("meta ai") || desc.contains("chats"))) -> 125
                     id.endsWith("menuitem_search") || id.contains("menuitem_search") -> 100
                     id.contains("search") -> 90
                     text == "search" || desc == "search" || text == "खोजें" || desc == "खोजें" -> 80
@@ -353,7 +356,15 @@ class AgentAccessibilityService : AccessibilityService() {
         val text = node.text?.toString()?.trim()?.lowercase(Locale.ROOT).orEmpty()
         val desc = node.contentDescription?.toString()?.trim()?.lowercase(Locale.ROOT).orEmpty()
         val id = node.viewIdResourceName?.lowercase(Locale.ROOT).orEmpty()
-        val isSearch = id.contains("menuitem_search") || id.contains("search") ||
+        // New WhatsApp Android UI exposes a persistent pill labelled
+        // "Ask Meta AI or Search" on the Chats screen; it is not an EditText
+        // until tapped and may have no resource-id containing "search".
+        val hasMetaSearchLabel =
+            text.contains("ask meta ai") || desc.contains("ask meta ai") ||
+            (text.contains("meta ai") && text.contains("search")) ||
+            (desc.contains("meta ai") && desc.contains("search"))
+        val isSearch = hasMetaSearchLabel ||
+            id.contains("menuitem_search") || id.contains("search") ||
             text == "search" || desc == "search" ||
             text == "खोजें" || desc == "खोजें" ||
             text.contains("search chats") || desc.contains("search chats")
