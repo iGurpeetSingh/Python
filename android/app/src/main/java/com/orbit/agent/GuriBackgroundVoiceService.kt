@@ -208,12 +208,16 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
             .replace("गुरूजी", "गुरी")
             .replace("गुरुजी", "गुरी")
         val hasWakeWord = normalized.contains("गुरी") || normalized.contains("guri")
+        val asksWhatsApp = listOf("व्हाट्सएप", "व्हाट्स ऐप", "वाट्सएप", "whatsapp", "what's app").any { normalized.contains(it) }
+        val isWhatsAppFollowUp = whatsAppAwaitingContact || whatsAppAwaitingChoice || whatsAppAwaitingConfirmation
+        // WhatsApp has a dedicated natural-language command path and does not require
+        // the Guri wake word. Keep the wake-word requirement for unrelated controls.
+        val isWhatsAppCommand = asksWhatsApp || isWhatsAppFollowUp
         val asksNext = listOf("अगली", "अगला", "फिर स्क्रॉल", "फिर स्क्रोल", "रील को स्क्रॉल", "रील को स्क्रोल", "रील स्क्रॉल",
             "रील स्क्रोल", "रील स्क्रॉल करो", "रील स्क्रोल करो", "री स्क्रॉल", "री स्क्रोल",
             "रीस्क्रॉल", "रीस्क्रोल", "स्क्रॉल करो", "स्क्रोल करो", "स्क्रॉल", "स्क्रोल", "वीडियो स्क्रॉल", "वीडियो स्क्रोल", "वीडियो को स्क्रॉल", "वीडियो को स्क्रोल", "video scroll", "scroll video", "next reel", "scroll up", "swipe up", "reel scroll")
             .any { normalized.contains(it) }
-        val isWhatsAppFollowUp = whatsAppAwaitingContact || whatsAppAwaitingChoice || whatsAppAwaitingConfirmation
-        if (!hasWakeWord && !isWhatsAppFollowUp) {
+        if (!hasWakeWord && !isWhatsAppCommand) {
             updateListeningNotification("आवाज़ मिली, Guri नाम नहीं पहचाना: " + normalized.take(70))
             handler.postDelayed({ startRecognition() }, 350)
             return
@@ -253,9 +257,8 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
         }
 
         val asksInstagram = listOf("instagram", "insta", "इंस्टाग्राम", "इंस्टा ग्राम", "इंस्टा").any { normalized.contains(it) }
-        val asksWhatsApp = listOf("व्हाट्सएप", "व्हाट्स ऐप", "वाट्सएप", "whatsapp", "what's app").any { normalized.contains(it) }
 
-        if (asksWhatsApp || isWhatsAppFollowUp) {
+        if (isWhatsAppCommand) {
             handleWhatsAppCommand(normalized, alternatives.map { it.lowercase(Locale.ROOT) })
             return
         }
@@ -466,8 +469,10 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
                 return@postDelayed
             }
             if (recipient.isNullOrBlank()) {
-                whatsAppAwaitingContact = true
-                speak("WhatsApp खोल दिया है। किस contact को message भेजना है?")
+                // "WhatsApp खोलो" is an app-launch command only. Do not jump into
+                // Search and do not ask for a recipient until the user asks for a chat.
+                whatsAppAwaitingContact = false
+                speak("WhatsApp खोल दिया है।")
                 return@postDelayed
             }
 
