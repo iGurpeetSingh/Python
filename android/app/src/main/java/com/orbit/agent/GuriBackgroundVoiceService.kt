@@ -487,21 +487,42 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
             }.distinctBy { it.lowercase(Locale.ROOT) }
 
             updateListeningNotification("WhatsApp में " + recipient + " खोज रही हूँ")
-            if (!service.openWhatsAppSearch()) {
-                speak("WhatsApp का Search बटन नहीं खुल पाया। WhatsApp की Chats स्क्रीन पर दोबारा कोशिश करें।")
-                whatsAppAwaitingContact = true
+            openWhatsAppSearchWithRetry(service, recipient, queries, 0)
+        }, 1100)
+    }
+
+    private fun openWhatsAppSearchWithRetry(
+        service: AgentAccessibilityService,
+        requestedName: String,
+        queries: List<String>,
+        attempt: Int
+    ) {
+        if (!service.isPackageForeground("com.whatsapp")) {
+            speak("WhatsApp की स्क्रीन बदल गई; Search नहीं खोला।")
+            return
+        }
+        if (service.isWhatsAppSearchFieldVisible()) {
+            searchWhatsAppQueries(service, requestedName, queries, 0)
+            return
+        }
+
+        // Attempt one may open the overflow menu; a later attempt can then see
+        // its Search row. Never announce failure before checking the rendered UI.
+        service.openWhatsAppSearch()
+        handler.postDelayed({
+            if (!service.isPackageForeground("com.whatsapp")) {
+                speak("WhatsApp की स्क्रीन बदल गई; Search रोक दी।")
                 return@postDelayed
             }
-            // Allow WhatsApp's toolbar Search action to expand and attach its EditText
-            // before inspecting the accessibility tree for the actual search field.
-            handler.postDelayed({
-                if (!service.isPackageForeground("com.whatsapp")) {
-                    speak("WhatsApp की स्क्रीन बदल गई।")
-                    return@postDelayed
-                }
-                searchWhatsAppQueries(service, recipient, queries, 0)
-            }, 550)
-        }, 1100)
+            if (service.isWhatsAppSearchFieldVisible()) {
+                searchWhatsAppQueries(service, requestedName, queries, 0)
+            } else if (attempt < 5) {
+                openWhatsAppSearchWithRetry(service, requestedName, queries, attempt + 1)
+            } else {
+                whatsAppAwaitingContact = true
+                speak("WhatsApp की Search स्क्रीन छह कोशिशों के बाद भी नहीं खुली। Chats स्क्रीन पर रहें और दोबारा बोलें।")
+            }
+        }, 650)
     }
 
     private fun searchWhatsAppQueries(
