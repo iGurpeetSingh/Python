@@ -261,7 +261,8 @@ class AgentAccessibilityService : AccessibilityService() {
      * Opens WhatsApp's own Search control. First detect an already expanded search box;
      * otherwise click a visible Search action by its label or resource id.
      */
-    fun openWhatsAppSearch(): Boolean {
+    /** True when WhatsApp's expanded toolbar Search input is actually present. */
+    fun isWhatsAppSearchFieldVisible(): Boolean {
         val root = rootInActiveWindow ?: return false
         if (root.packageName?.toString() != "com.whatsapp") {
             root.recycle()
@@ -269,33 +270,78 @@ class AgentAccessibilityService : AccessibilityService() {
         }
         val editables = mutableListOf<AccessibilityNodeInfo>()
         collectEditableNodes(root, editables, 0)
-        val alreadyOpen = editables.any { node ->
+        root.recycle()
+        val visible = editables.any { node ->
             val hint = node.hintText?.toString()?.lowercase(Locale.ROOT).orEmpty()
-            val text = node.text?.toString()?.lowercase(Locale.ROOT).orEmpty()
             val id = node.viewIdResourceName?.lowercase(Locale.ROOT).orEmpty()
+            val cls = node.className?.toString()?.lowercase(Locale.ROOT).orEmpty()
             node.isVisibleToUser && node.isEnabled &&
-                (hint.contains("search") || hint.contains("खोज") ||
-                 text == "search" || text == "खोजें" ||
-                 id.contains("search") || id.contains("search_src_text"))
+                (id.endsWith("search_src_text") || id.contains("search_src_text") ||
+                 hint.contains("search") || hint.contains("खोज") ||
+                 (cls.contains("autocompletetextview") && id.contains("search")))
         }
         editables.forEach { it.recycle() }
-        if (alreadyOpen) {
+        return visible
+    }
+
+    /**
+     * Opens WhatsApp Search using stable Android view IDs first, then accessibility
+     * labels. If Search is hidden in the overflow menu, open that menu; the caller
+     * retries after the menu has rendered and then selects its Search item.
+     */
+    fun openWhatsAppSearch(): Boolean {
+        val root = rootInActiveWindow ?: return false
+        if (root.packageName?.toString() != "com.whatsapp") {
+            root.recycle()
+            return false
+        }
+        if (isWhatsAppSearchFieldVisible()) {
             root.recycle()
             return true
         }
 
         val candidates = mutableListOf<AccessibilityNodeInfo>()
         collectWhatsAppSearchControls(root, candidates, 0)
-        root.recycle()
-        val target = candidates
+        val ranked = candidates
             .filter { it.isVisibleToUser && it.isEnabled }
-            .sortedByDescending { it.isClickable || it.isFocusable }
-            .firstOrNull()
-        candidates.filter { it !== target }.forEach { it.recycle() }
+            .sortedByDescending { node ->
+                val id = node.viewIdResourceName?.lowercase(Locale.ROOT).orEmpty()
+                val text = node.text?.toString()?.lowercase(Locale.ROOT).orEmpty()
+                val desc = node.contentDescription?.toString()?.lowercase(Locale.ROOT).orEmpty()
+                when {
+                    id.endsWith("menuitem_search") || id.contains("menuitem_search") -> 100
+                    id.contains("search") -> 90
+                    text == "search" || desc == "search" || text == "खोजें" || desc == "खोजें" -> 80
+                    text.contains("search chats") || desc.contains("search chats") -> 70
+                    else -> 10
+                } + if (node.isClickable) 5 else 0
+            }
+        var clicked = false
+        for (candidate in ranked) {
+            if (clickNode(candidate)) {
+                clicked = true
+                break
+            }
+        }
+        candidates.forEach { it.recycle() }
+        root.recycle()
+        if (clicked) return true
+
+        // Search may be inside the top-right overflow menu on some WhatsApp layouts.
+        val freshRoot = rootInActiveWindow ?: return false
+        if (freshRoot.packageName?.toString() != "com.whatsapp") {
+            freshRoot.recycle()
+            return false
+        }
+        val overflow = mutableListOf<AccessibilityNodeInfo>()
+        collectWhatsAppOverflowControls(freshRoot, overflow, 0)
+        freshRoot.recycle()
+        val target = overflow.firstOrNull { it.isVisibleToUser && it.isEnabled }
+        overflow.filter { it !== target }.forEach { it.recycle() }
         if (target == null) return false
-        val clicked = clickNode(target)
+        val opened = clickNode(target)
         target.recycle()
-        return clicked
+        return opened
     }
 
     private fun collectWhatsAppSearchControls(
@@ -303,18 +349,38 @@ class AgentAccessibilityService : AccessibilityService() {
         out: MutableList<AccessibilityNodeInfo>,
         depth: Int
     ) {
-        if (depth > 20) return
-        val text = node.text?.toString()?.lowercase(Locale.ROOT).orEmpty()
-        val desc = node.contentDescription?.toString()?.lowercase(Locale.ROOT).orEmpty()
+        if (depth > 24) return
+        val text = node.text?.toString()?.trim()?.lowercase(Locale.ROOT).orEmpty()
+        val desc = node.contentDescription?.toString()?.trim()?.lowercase(Locale.ROOT).orEmpty()
         val id = node.viewIdResourceName?.lowercase(Locale.ROOT).orEmpty()
-        val isSearch = text == "search" || desc == "search" ||
+        val isSearch = id.contains("menuitem_search") || id.contains("search") ||
+            text == "search" || desc == "search" ||
             text == "खोजें" || desc == "खोजें" ||
-            text.contains("search chats") || desc.contains("search chats") ||
-            id.contains("menu_search") || id.contains("search")
+            text.contains("search chats") || desc.contains("search chats")
         if (node.isVisibleToUser && isSearch) out.add(AccessibilityNodeInfo.obtain(node))
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
             collectWhatsAppSearchControls(child, out, depth + 1)
+            child.recycle()
+        }
+    }
+
+    private fun collectWhatsAppOverflowControls(
+        node: AccessibilityNodeInfo,
+        out: MutableList<AccessibilityNodeInfo>,
+        depth: Int
+    ) {
+        if (depth > 24) return
+        val text = node.text?.toString()?.trim()?.lowercase(Locale.ROOT).orEmpty()
+        val desc = node.contentDescription?.toString()?.trim()?.lowercase(Locale.ROOT).orEmpty()
+        val id = node.viewIdResourceName?.lowercase(Locale.ROOT).orEmpty()
+        val isOverflow = id.contains("menuitem_overflow") || id.contains("overflow") ||
+            desc.contains("more options") || text.contains("more options") ||
+            desc.contains("अधिक विकल्प") || text.contains("अधिक विकल्प")
+        if (node.isVisibleToUser && isOverflow) out.add(AccessibilityNodeInfo.obtain(node))
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            collectWhatsAppOverflowControls(child, out, depth + 1)
             child.recycle()
         }
     }
