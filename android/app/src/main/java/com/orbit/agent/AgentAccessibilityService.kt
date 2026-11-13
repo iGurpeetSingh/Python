@@ -268,17 +268,26 @@ class AgentAccessibilityService : AccessibilityService() {
             root.recycle()
             return false
         }
+        val rootBounds = android.graphics.Rect()
+        root.getBoundsInScreen(rootBounds)
         val editables = mutableListOf<AccessibilityNodeInfo>()
         collectEditableNodes(root, editables, 0)
         root.recycle()
         val visible = editables.any { node ->
             val hint = node.hintText?.toString()?.lowercase(Locale.ROOT).orEmpty()
+            val text = node.text?.toString()?.lowercase(Locale.ROOT).orEmpty()
+            val desc = node.contentDescription?.toString()?.lowercase(Locale.ROOT).orEmpty()
             val id = node.viewIdResourceName?.lowercase(Locale.ROOT).orEmpty()
             val cls = node.className?.toString()?.lowercase(Locale.ROOT).orEmpty()
-            node.isVisibleToUser && node.isEnabled &&
-                (id.endsWith("search_src_text") || id.contains("search_src_text") ||
-                 hint.contains("search") || hint.contains("खोज") ||
-                 (cls.contains("autocompletetextview") && id.contains("search")))
+            val bounds = android.graphics.Rect()
+            node.getBoundsInScreen(bounds)
+            val inTopSearchArea = rootBounds.height() > 0 &&
+                bounds.centerY() < rootBounds.top + rootBounds.height() * 0.38f
+            val hasSearchIdentity =
+                id.contains("search") || hint.contains("search") || hint.contains("खोज") ||
+                text.contains("ask meta ai") || desc.contains("ask meta ai") ||
+                (cls.contains("autocompletetextview") && inTopSearchArea)
+            node.isVisibleToUser && node.isEnabled && inTopSearchArea && hasSearchIdentity
         }
         editables.forEach { it.recycle() }
         return visible
@@ -406,18 +415,27 @@ class AgentAccessibilityService : AccessibilityService() {
         val nodes = mutableListOf<AccessibilityNodeInfo>()
         collectEditableNodes(root, nodes, 0)
         root.recycle()
+        val rootBounds = android.graphics.Rect()
+        val freshRoot = rootInActiveWindow
+        freshRoot?.getBoundsInScreen(rootBounds)
+        freshRoot?.recycle()
         val target = nodes.firstOrNull { node ->
             val hint = node.hintText?.toString()?.lowercase(Locale.ROOT).orEmpty()
             val text = node.text?.toString()?.lowercase(Locale.ROOT).orEmpty()
             val desc = node.contentDescription?.toString()?.lowercase(Locale.ROOT).orEmpty()
             val id = node.viewIdResourceName?.lowercase(Locale.ROOT).orEmpty()
             val className = node.className?.toString()?.lowercase(Locale.ROOT).orEmpty()
-            node.isVisibleToUser && node.isEnabled &&
-                (hint.contains("search") || hint.contains("खोज") ||
-                 text == "search" || text == "खोजें" ||
-                 desc.contains("search") || desc.contains("खोज") ||
-                 id.contains("search") || id.contains("search_src_text") ||
-                 className.contains("autocompletetextview") && (hint.isNotBlank() || id.contains("search")))
+            val bounds = android.graphics.Rect()
+            node.getBoundsInScreen(bounds)
+            val inTopSearchArea = rootBounds.height() > 0 &&
+                bounds.centerY() < rootBounds.top + rootBounds.height() * 0.38f
+            val hasSearchIdentity =
+                hint.contains("search") || hint.contains("खोज") ||
+                text.contains("ask meta ai") || desc.contains("ask meta ai") ||
+                desc.contains("search") || desc.contains("खोज") ||
+                id.contains("search") ||
+                (className.contains("autocompletetextview") && inTopSearchArea)
+            node.isVisibleToUser && node.isEnabled && inTopSearchArea && hasSearchIdentity
         }
         nodes.filter { it !== target }.forEach { it.recycle() }
         if (target == null) return false
