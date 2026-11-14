@@ -27,7 +27,8 @@ private data class ObjectiveDraft(
 
 private data class WrittenDraft(
     val prompt: StringBuilder = StringBuilder(),
-    var marks: Int? = null
+    var marks: Int? = null,
+    var hasOptions: Boolean = false
 )
 
 class CoachingExamActivity : Activity() {
@@ -508,7 +509,7 @@ class CoachingExamActivity : Activity() {
 
             when {
                 questionMatch != null -> {
-                    current?.let { drafts.add(it) }
+                    current?.let { if (it.options.isNotEmpty() || it.correctIndex != null) drafts.add(it) }
                     current = ObjectiveDraft().apply { prompt.append(questionMatch.groupValues[2].trim()) }
                 }
                 optionMatch != null -> {
@@ -525,7 +526,7 @@ class CoachingExamActivity : Activity() {
                 }
             }
         }
-        current?.let { drafts.add(it) }
+        current?.let { if (it.options.isNotEmpty() || it.correctIndex != null) drafts.add(it) }
         if (drafts.size != 50) throw IllegalArgumentException("Objective Exam needs exactly 50 numbered questions. Found ${drafts.size}.")
         val result = JSONArray()
         drafts.forEachIndexed { index, draft ->
@@ -550,12 +551,14 @@ class CoachingExamActivity : Activity() {
         var current: WrittenDraft? = null
         val questionPattern = Regex("^(?:Q(?:uestion)?\\s*)?(\\d+)\\s*[.)\\:-]\\s*(.+)$", RegexOption.IGNORE_CASE)
         val marksPattern = Regex("^(?:marks?|अंक)\\s*[:=\\-]\\s*(\\d+)\\s*$", RegexOption.IGNORE_CASE)
+        val optionPattern = Regex("^([A-D])\\s*[).:\\-]\\s*(.+)$", RegexOption.IGNORE_CASE)
 
         raw.lines().forEach { rawLine ->
             val line = rawLine.trim()
             if (line.isEmpty()) return@forEach
             val questionMatch = questionPattern.matchEntire(line)
             val marksMatch = marksPattern.matchEntire(line)
+            val optionMatch = optionPattern.matchEntire(line)
             when {
                 questionMatch != null -> {
                     current?.let { drafts.add(it) }
@@ -565,14 +568,16 @@ class CoachingExamActivity : Activity() {
                     val draft = current ?: throw IllegalArgumentException("Marks line found before the first numbered question.")
                     draft.marks = marksMatch.groupValues[1].toIntOrNull()
                 }
+                optionMatch != null -> current?.hasOptions = true
                 else -> current?.prompt?.append(" ")?.append(line)
             }
         }
         current?.let { drafts.add(it) }
-        if (drafts.isEmpty()) throw IllegalArgumentException("No numbered written questions found.")
+        val writtenDrafts = drafts.filterNot { it.hasOptions }
+        if (writtenDrafts.isEmpty()) throw IllegalArgumentException("No numbered written questions found. Paste the written section with Marks: 2, 4, or 6 lines.")
         var total = 0
         val result = JSONArray()
-        drafts.forEachIndexed { index, draft ->
+        writtenDrafts.forEachIndexed { index, draft ->
             val marks = draft.marks ?: throw IllegalArgumentException("Written question ${index + 1} needs a Marks: 2, 4, or 6 line.")
             if (marks !in listOf(2, 4, 6)) throw IllegalArgumentException("Question ${index + 1} must carry 2, 4, or 6 marks.")
             if (draft.prompt.isBlank()) throw IllegalArgumentException("Question ${index + 1} has no text.")
