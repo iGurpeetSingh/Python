@@ -110,6 +110,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         layout.addView(help)
         setContentView(layout)
         if (intent?.action == ACTION_YOUTUBE_UPLOAD) {
+            pendingYoutubeAction = true
             handler.postDelayed({ beginYoutubeUpload(intent) }, 350)
         }
         updateAccessibilityButton()
@@ -124,7 +125,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         super.onResume()
         isResumed = true
         updateAccessibilityButton()
-        if (listeningEnabled && hasAudioPermission()) startBackgroundVoiceService(GuriBackgroundVoiceService.ACTION_LISTEN)
+        if (listeningEnabled && hasAudioPermission() && !pendingYoutubeAction) startBackgroundVoiceService(GuriBackgroundVoiceService.ACTION_LISTEN)
     }
 
     override fun onPause() {
@@ -174,7 +175,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 status.text = "गुरी बैकग्राउंड में सुन रही है…"
             } else status.text = "Voice चलाने के लिए Microphone permission जरूरी है।"
         } else if (requestCode == REQUEST_MEDIA_VIDEO) {
-            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+            if (grantResults.any { it == PackageManager.PERMISSION_GRANTED }) {
                 findVideoForYoutubeUpload()
             } else {
                 status.text = "वीडियो पढ़ने की अनुमति नहीं मिली। अब वीडियो चुनने के लिए picker खोल रही हूँ।"
@@ -191,7 +192,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         status.text = "YouTube के लिए फोन में वीडियो खोज रही हूँ…"
         if (android.os.Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(Manifest.permission.READ_MEDIA_VIDEO), REQUEST_MEDIA_VIDEO)
+            requestPermissions(
+                arrayOf(Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED),
+                REQUEST_MEDIA_VIDEO
+            )
         } else if (android.os.Build.VERSION.SDK_INT < 33 &&
             checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE), REQUEST_MEDIA_VIDEO)
@@ -248,7 +252,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 AlertDialog.Builder(this)
                     .setTitle("एक से अधिक वीडियो मिलीं")
                     .setItems(labels) { _, which -> prepareYoutubeUpload(matches[which].first, matches[which].second) }
-                    .setNegativeButton("रद्द करें", null)
+                    .setNegativeButton("रद्द करें") { _, _ -> cancelYoutubeUpload() }
                     .show()
             }
         }
@@ -351,6 +355,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     tts?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "youtube-upload-success")
                     selectedYoutubeUri = null
                     pendingYoutubeAction = false
+                    if (listeningEnabled) startBackgroundVoiceService(GuriBackgroundVoiceService.ACTION_LISTEN)
                 }
             },
             onError = { error -> runOnUiThread { showYoutubeError(error) } }
