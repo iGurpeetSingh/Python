@@ -141,6 +141,14 @@ def _attempt_path(paper_type: str, attempt_id: str) -> str:
     return f"data/exams/attempts/{paper_type}/{attempt_id}.json"
 
 
+def _is_whole_number(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return True
+    return isinstance(value, float) and math.isfinite(value) and value.is_integer()
+
+
 def _parse_utc(value: str) -> datetime:
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -187,7 +195,7 @@ def _validate_paper(paper_type: str, payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(422, "startAt must be an ISO date-time with timezone.") from exc
 
     raw_duration = cleaned.get("durationMinutes", 60)
-    if isinstance(raw_duration, bool) or not isinstance(raw_duration, (int, float)) or int(raw_duration) != raw_duration:
+    if not _is_whole_number(raw_duration):
         raise HTTPException(422, "durationMinutes must be a whole number.")
     duration = int(raw_duration)
     if duration < 1 or duration > 300:
@@ -211,12 +219,8 @@ def _validate_paper(paper_type: str, payload: dict[str, Any]) -> dict[str, Any]:
             raw_answer = question.get("correctIndex")
             raw_marks = question.get("marks", 2)
             if (
-                isinstance(raw_answer, bool)
-                or not isinstance(raw_answer, (int, float))
-                or int(raw_answer) != raw_answer
-                or isinstance(raw_marks, bool)
-                or not isinstance(raw_marks, (int, float))
-                or int(raw_marks) != raw_marks
+                not _is_whole_number(raw_answer)
+                or not _is_whole_number(raw_marks)
             ):
                 raise HTTPException(422, f"Objective question {index} needs whole-number correctIndex and marks.")
             answer = int(raw_answer)
@@ -238,9 +242,7 @@ def _validate_paper(paper_type: str, payload: dict[str, Any]) -> dict[str, Any]:
                 raise HTTPException(422, f"Written question {index} is missing its prompt.")
             raw_marks = question.get("marks")
             if (
-                isinstance(raw_marks, bool)
-                or not isinstance(raw_marks, (int, float))
-                or int(raw_marks) != raw_marks
+                not _is_whole_number(raw_marks)
             ):
                 raise HTTPException(422, f"Written question {index} needs whole-number marks.")
             marks = int(raw_marks)
