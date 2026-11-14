@@ -8,7 +8,7 @@ The repository already contains a Render Blueprint for the `guri-cloud` Docker s
 
 After creating or syncing the Blueprint, open the `guri-cloud` service → **Environment** and add the two secret values below. Render does not automatically prompt for `sync: false` variables when syncing an already-existing service; add them manually in that case. See the [Render Blueprint specification](https://render.com/docs/blueprint-spec) and [deploy documentation](https://render.com/docs/deploys).
 
-Once the service deploys, copy its exact `https://…onrender.com` URL. Check `GET /api/health` on that URL. Then set `VITE_EXAMS_API_URL` in the Coaching Website Vercel project's Production environment to that exact base URL and redeploy the site.
+Once the service deploys, copy its exact `https://…onrender.com` URL. Check `GET /api/health` on that URL. Then set `VITE_EXAMS_API_URL` in the Coaching Website Vercel project's Production environment to that exact base URL and redeploy the site. The health response should include `paper_api_configured: true` after both secrets are saved.
 
 ## Required Render environment variables
 
