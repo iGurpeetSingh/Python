@@ -45,11 +45,28 @@ def _duration_seconds(path: Path) -> float | None:
 
 def _requested_duration(command: str) -> int | None:
     value = command.casefold()
+    hindi_numbers = {
+        "शून्य": 0, "एक": 1, "दो": 2, "तीन": 3, "चार": 4,
+        "पांच": 5, "पाँच": 5, "छह": 6, "सात": 7, "आठ": 8, "नौ": 9, "दस": 10,
+    }
     minute = re.search(r"(\d+)\s*(?:minutes?|mins?|मिनट)", value)
     second = re.search(r"(\d+)\s*(?:seconds?|secs?|सेकंड)", value)
-    if not minute and not second:
+    if not minute:
+        word = re.search(r"(शून्य|एक|दो|तीन|चार|पांच|पाँच|छह|सात|आठ|नौ|दस)\s*मिनट", value)
+        if word:
+            minute_value = hindi_numbers[word.group(1)]
+        else:
+            minute_value = 0
+    else:
+        minute_value = int(minute.group(1))
+    if not second:
+        word = re.search(r"(शून्य|एक|दो|तीन|चार|पांच|पाँच|छह|सात|आठ|नौ|दस)\s*सेकंड", value)
+        second_value = hindi_numbers[word.group(1)] if word else 0
+    else:
+        second_value = int(second.group(1))
+    if not minute and not second and minute_value == 0 and second_value == 0:
         return None
-    return int(minute.group(1) if minute else 0) * 60 + int(second.group(1) if second else 0)
+    return minute_value * 60 + second_value
 
 
 def find_video(command: str) -> Path:
