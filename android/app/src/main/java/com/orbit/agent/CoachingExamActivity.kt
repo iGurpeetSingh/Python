@@ -259,7 +259,7 @@ class CoachingExamActivity : Activity() {
     private fun parseObjective(raw: String): JSONArray {
         val drafts = mutableListOf<ObjectiveDraft>()
         var current: ObjectiveDraft? = null
-        val questionPattern = Regex("^(?:Q(?:uestion)?\\s*)?(\\d+)\\s*[.)\\:-]\\s*(.+)$", RegexOption.IGNORE_CASE)
+        val questionPattern = Regex("^(?:Q(?:uestion)?\\s*)?(\\d+)\\s*[.):\\-]\\s*(.+)$", RegexOption.IGNORE_CASE)
         val optionPattern = Regex("^([A-D])\\s*[).:\\-]\\s*(.+)$", RegexOption.IGNORE_CASE)
         val answerPattern = Regex("^(?:answer|ans|correct\\s*option|उत्तर)\\s*[:=\\-]\\s*([A-D])\\s*$", RegexOption.IGNORE_CASE)
 
