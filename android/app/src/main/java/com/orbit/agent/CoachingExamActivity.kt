@@ -82,7 +82,7 @@ class CoachingExamActivity : Activity() {
         apiUrlInput = addInput(content, "Render API URL", prefs.getString("api_url", "") ?: "", "https://your-service.onrender.com")
         adminTokenInput = addInput(
             content, "Admin token (PAPER_ADMIN_TOKEN)",
-            prefs.getString("admin_token", "") ?: "", "Paste the private admin token",
+            "", "Paste the private admin token",
             InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
         )
         addDivider(content)
@@ -395,10 +395,8 @@ class CoachingExamActivity : Activity() {
             return
         }
         val preferences = getSharedPreferences("coaching_exam_control", MODE_PRIVATE)
-        preferences.edit()
-            .putString("api_url", baseUrl)
-            .putString("admin_token", adminToken)
-            .apply()
+        // Keep only the service URL; do not persist the privileged token in plaintext.
+        preferences.edit().putString("api_url", baseUrl).apply()
 
         publishObjectiveButton.isEnabled = false
         publishWrittenButton.isEnabled = false
