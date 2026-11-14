@@ -39,6 +39,18 @@ For Instagram/Reels automation, Guri:
 
 Android Accessibility permission is required for tapping and scrolling. It is an explicit Android system permission and cannot be silently enabled by an app. Android may also restrict background microphone use; start the command while Guri is open and listening. Once Instagram is foreground, Guri does not secretly listen in the background.
 
+## Coaching & Exam Control (optional cloud feature)
+
+The Android app now has a **Coaching & Exam Control** screen for creating and publishing Objective and Written exam papers. This feature is separate from Guri's local voice commands and requires the FastAPI service to be deployed over HTTPS.
+
+- Set `PAPER_GITHUB_TOKEN` and `PAPER_ADMIN_TOKEN` in the Render service Environment.
+- The GitHub token needs Contents: Read and write access to the private storage repository.
+- The Paper API stores `data/exams/objective.json` and `data/exams/written.json` in GitHub. It does not use a database.
+- Enter the deployed Render API base URL and the private admin token in the Android Coaching & Exam Control screen.
+- Set `VITE_EXAMS_API_URL` in the Coaching website's Vercel project to the same Render base URL.
+
+See [Exam Publishing API setup](docs/EXAM-PUBLISHING-API.md) for API paths, paper format, security, and deployment configuration. Until the Render secrets are configured and the backend is deployed, the publish/website connection is not live. The ordinary local Guri voice workflows remain independent.
+
 ## Important boundaries
 
 - The phone app currently implements the Instagram/Reels voice flow. It is not yet a general-purpose visual AI agent for every Android app.
