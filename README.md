@@ -29,7 +29,7 @@ One-time YouTube setup:
 2. Configure the OAuth consent screen and create an **OAuth Client ID → Desktop app**.
 3. Download the client JSON and save it outside this repository as `%USERPROFILE%\\.guri\\youtube\\client_secret.json`. Never commit this file or `token.json`.
 4. Install the updated backend requirements and restart `Start-Guri.bat`. On the first upload, a browser opens for Google sign-in and YouTube channel authorization.
-5. Install FFmpeg (for FFprobe duration matching). Optional: `pip install faster-whisper`; the first local transcription downloads a Whisper model. Without it, SEO generation uses the spoken instruction and filename only, not the actual video dialogue.
+5. Install FFmpeg (for FFprobe duration matching and frame extraction). Run `ollama pull llava:7b` for visual analysis. Optional: `pip install faster-whisper`; the first local transcription downloads a Whisper model. Without it, SEO generation uses the spoken instruction and filename only, not the actual video dialogue.
 
 Set `GURI_VIDEO_DIR` to a dedicated folder to make video selection deterministic. If multiple files match, Guri asks for the filename rather than guessing. The API OAuth project may need Google verification; unverified projects can be restricted to private uploads, so verify the channel visibility after setup. Guri reports success only after YouTube returns a video ID. This feature currently uploads videos and metadata; it does not generate/upload custom thumbnails.
 
