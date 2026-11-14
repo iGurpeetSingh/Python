@@ -7,7 +7,7 @@ services:
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /api/health
-    autoDeployTrigger: off
+    autoDeployTrigger: checksPass
     envVars:
       - key: GURI_CLOUD_MODE
         value: "true"
