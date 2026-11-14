@@ -186,10 +186,10 @@ def _validate_paper(paper_type: str, payload: dict[str, Any]) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(422, "startAt must be an ISO date-time with timezone.") from exc
 
-    try:
-        duration = int(cleaned.get("durationMinutes", 60))
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(422, "durationMinutes must be a number.") from exc
+    raw_duration = cleaned.get("durationMinutes", 60)
+    if isinstance(raw_duration, bool) or not isinstance(raw_duration, (int, float)) or int(raw_duration) != raw_duration:
+        raise HTTPException(422, "durationMinutes must be a whole number.")
+    duration = int(raw_duration)
     if duration < 1 or duration > 300:
         raise HTTPException(422, "durationMinutes must be between 1 and 300.")
     cleaned["durationMinutes"] = duration
@@ -208,11 +208,19 @@ def _validate_paper(paper_type: str, payload: dict[str, Any]) -> dict[str, Any]:
                 raise HTTPException(422, f"Objective question {index} must have exactly 4 options.")
             if not all(str(option).strip() for option in options):
                 raise HTTPException(422, f"Objective question {index} has an empty option.")
-            try:
-                answer = int(question.get("correctIndex"))
-                marks = int(question.get("marks", 2))
-            except (TypeError, ValueError) as exc:
-                raise HTTPException(422, f"Objective question {index} needs correctIndex and marks.") from exc
+            raw_answer = question.get("correctIndex")
+            raw_marks = question.get("marks", 2)
+            if (
+                isinstance(raw_answer, bool)
+                or not isinstance(raw_answer, (int, float))
+                or int(raw_answer) != raw_answer
+                or isinstance(raw_marks, bool)
+                or not isinstance(raw_marks, (int, float))
+                or int(raw_marks) != raw_marks
+            ):
+                raise HTTPException(422, f"Objective question {index} needs whole-number correctIndex and marks.")
+            answer = int(raw_answer)
+            marks = int(raw_marks)
             if answer not in range(4) or marks != 2:
                 raise HTTPException(422, f"Objective question {index} needs a valid answer and 2 marks.")
             question["correctIndex"] = answer
@@ -228,10 +236,14 @@ def _validate_paper(paper_type: str, payload: dict[str, Any]) -> dict[str, Any]:
         for index, question in enumerate(questions, start=1):
             if not isinstance(question, dict) or not str(question.get("prompt", "")).strip():
                 raise HTTPException(422, f"Written question {index} is missing its prompt.")
-            try:
-                marks = int(question.get("marks"))
-            except (TypeError, ValueError) as exc:
-                raise HTTPException(422, f"Written question {index} needs marks.") from exc
+            raw_marks = question.get("marks")
+            if (
+                isinstance(raw_marks, bool)
+                or not isinstance(raw_marks, (int, float))
+                or int(raw_marks) != raw_marks
+            ):
+                raise HTTPException(422, f"Written question {index} needs whole-number marks.")
+            marks = int(raw_marks)
             if marks not in (2, 4, 6):
                 raise HTTPException(422, f"Written question {index} must carry 2, 4, or 6 marks.")
             question["marks"] = marks
