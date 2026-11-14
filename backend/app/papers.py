@@ -489,7 +489,11 @@ async def grade_written_attempt(
     total = 0
     for index, question in enumerate(questions):
         raw = awarded.get(str(index), 0)
-        if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not math.isfinite(raw):
+        if (
+            isinstance(raw, bool)
+            or not isinstance(raw, (int, float))
+            or (isinstance(raw, float) and not math.isfinite(raw))
+        ):
             raise HTTPException(422, f"Marks for question {index + 1} must be numeric.")
         mark = int(raw)
         if mark != raw or mark < 0 or mark > int(question["marks"]):
