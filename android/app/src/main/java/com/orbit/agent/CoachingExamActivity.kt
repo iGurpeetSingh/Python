@@ -43,6 +43,7 @@ class CoachingExamActivity : Activity() {
     private lateinit var statusText: TextView
     private lateinit var publishObjectiveButton: Button
     private lateinit var publishWrittenButton: Button
+    private lateinit var resultsContainer: LinearLayout
     private val client = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
@@ -158,6 +159,26 @@ class CoachingExamActivity : Activity() {
         }
         content.addView(unpublishWritten, buttonParams())
 
+        val resultsHeading = TextView(this).apply {
+            text = "RESULTS & WRITTEN MARKING"
+            textSize = 10f
+            setTextColor(android.graphics.Color.rgb(156, 171, 190))
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setPadding(0, dp(20), 0, dp(8))
+        }
+        content.addView(resultsHeading)
+        content.addView(makeButton("Load Objective Results", false) {
+            loadExamAttempts("objective")
+        }, buttonParams())
+        content.addView(makeButton("Load Written Submissions", false) {
+            loadExamAttempts("written")
+        }, buttonParams())
+        resultsContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(8), 0, dp(8))
+        }
+        content.addView(resultsContainer)
+
         statusText = TextView(this).apply {
             text = "Ready. Configure the API URL and admin token first."
             textSize = 12f
@@ -174,6 +195,156 @@ class CoachingExamActivity : Activity() {
         }
         root.addView(back)
         setContentView(root)
+    }
+
+
+    private fun addResultText(parent: LinearLayout, value: String, size: Float = 12f, bold: Boolean = false) {
+        val text = TextView(this).apply {
+            text = value
+            textSize = size
+            setTextColor(android.graphics.Color.rgb(218, 228, 239))
+            if (bold) typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setPadding(dp(8), dp(5), dp(8), dp(5))
+        }
+        parent.addView(text)
+    }
+
+    private fun loadExamAttempts(paperType: String) {
+        val baseUrl = apiUrlInput.text.toString().trim().trimEnd('/')
+        val adminToken = adminTokenInput.text.toString().trim()
+        if (!baseUrl.startsWith("https://") || adminToken.isBlank()) {
+            statusText.text = "Enter the HTTPS API URL and admin token first."
+            return
+        }
+        statusText.text = "Loading ${paperType} results from the server…"
+        Thread {
+            try {
+                val request = Request.Builder()
+                    .url("$baseUrl/api/admin/exams/$paperType/attempts")
+                    .header("X-Paper-Admin-Token", adminToken)
+                    .header("Accept", "application/json")
+                    .get()
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    val raw = response.body?.string().orEmpty()
+                    if (!response.isSuccessful) {
+                        val detail = runCatching { JSONObject(raw).optString("detail") }.getOrNull()
+                        throw IllegalStateException(detail?.takeIf { it.isNotBlank() } ?: "Results request failed (HTTP ${response.code}).")
+                    }
+                    val items = JSONObject(raw).optJSONArray("items") ?: JSONArray()
+                    runOnUiThread {
+                        renderExamAttempts(paperType, items)
+                        statusText.text = "${items.length()} ${paperType} attempt(s) loaded."
+                    }
+                }
+            } catch (error: Exception) {
+                runOnUiThread { statusText.text = error.localizedMessage ?: "Could not load results." }
+            }
+        }.start()
+    }
+
+    private fun renderExamAttempts(paperType: String, items: JSONArray) {
+        resultsContainer.removeAllViews()
+        if (items.length() == 0) {
+            addResultText(resultsContainer, "No submissions yet.")
+            return
+        }
+        for (index in 0 until items.length()) {
+            val attempt = items.optJSONObject(index) ?: continue
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(10), dp(10), dp(10), dp(12))
+                setBackgroundColor(android.graphics.Color.rgb(21, 31, 48))
+            }
+            val cardParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) }
+            resultsContainer.addView(card, cardParams)
+            addResultText(
+                card,
+                "${attempt.optString("studentName", "Student")} · Roll ${attempt.optString("rollNumber", "—")}",
+                13f,
+                true
+            )
+            addResultText(card, attempt.optString("title", paperType.replaceFirstChar { it.uppercase() }))
+            val state = attempt.optString("status", "unknown")
+            if (paperType == "objective") {
+                addResultText(card, "Status: $state · Score: ${attempt.opt("score") ?: "—"}/${attempt.optInt("totalMarks", 100)}", 11f, true)
+                addResultText(
+                    card,
+                    "Correct: ${attempt.opt("correctCount") ?: "—"} · Incorrect: ${attempt.opt("incorrectCount") ?: "—"} · Unanswered: ${attempt.opt("unansweredCount") ?: "—"}",
+                    10f
+                )
+                continue
+            }
+
+            val score = attempt.opt("score")
+            if (state == "graded") {
+                addResultText(card, "Graded: $score/${attempt.optInt("totalMarks", 100)}", 11f, true)
+                continue
+            }
+            addResultText(card, "Status: $state · Submitted: ${attempt.optString("submittedAt", "—")}", 10f)
+            val questions = attempt.optJSONArray("questions") ?: JSONArray()
+            val answers = attempt.optJSONObject("answers") ?: JSONObject()
+            val markInputs = mutableListOf<EditText>()
+            for (qIndex in 0 until questions.length()) {
+                val question = questions.optJSONObject(qIndex) ?: continue
+                val maximum = question.optInt("marks", 0)
+                addResultText(card, "Q${qIndex + 1}. ${question.optString("prompt")}", 11f, true)
+                addResultText(card, "Student answer: ${answers.optString(qIndex.toString(), "No answer")}", 10f)
+                val markInput = EditText(this).apply {
+                    hint = "Award 0–$maximum marks"
+                    inputType = InputType.TYPE_CLASS_NUMBER
+                    textSize = 12f
+                    setSingleLine(true)
+                    setTextColor(android.graphics.Color.WHITE)
+                    setHintTextColor(android.graphics.Color.rgb(119, 135, 154))
+                    setPadding(dp(10), dp(7), dp(10), dp(7))
+                    setBackgroundColor(android.graphics.Color.rgb(33, 45, 63))
+                }
+                markInputs.add(markInput)
+                card.addView(markInput, fieldParams())
+            }
+            val gradeButton = makeButton("Save Marks & Publish Result", true) {
+                val marks = JSONObject()
+                markInputs.forEachIndexed { qIndex, input ->
+                    marks.put(qIndex.toString(), input.text.toString().toIntOrNull() ?: 0)
+                }
+                gradeWrittenAttempt(attempt.optString("attemptId"), marks)
+            }
+            card.addView(gradeButton, buttonParams())
+        }
+    }
+
+    private fun gradeWrittenAttempt(attemptId: String, marks: JSONObject) {
+        val baseUrl = apiUrlInput.text.toString().trim().trimEnd('/')
+        val adminToken = adminTokenInput.text.toString().trim()
+        if (attemptId.isBlank() || !baseUrl.startsWith("https://") || adminToken.isBlank()) {
+            statusText.text = "Attempt ID, API URL or admin token is missing."
+            return
+        }
+        statusText.text = "Saving written marks…"
+        Thread {
+            try {
+                val request = Request.Builder()
+                    .url("$baseUrl/api/admin/exams/written/attempts/$attemptId/grade")
+                    .header("X-Paper-Admin-Token", adminToken)
+                    .post(JSONObject().put("marks", marks).toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    val raw = response.body?.string().orEmpty()
+                    if (!response.isSuccessful) {
+                        val detail = runCatching { JSONObject(raw).optString("detail") }.getOrNull()
+                        throw IllegalStateException(detail?.takeIf { it.isNotBlank() } ?: "Grade request failed (HTTP ${response.code}).")
+                    }
+                    val score = JSONObject(raw).opt("score")
+                    runOnUiThread {
+                        statusText.text = "Written result saved: $score/100."
+                        loadExamAttempts("written")
+                    }
+                }
+            } catch (error: Exception) {
+                runOnUiThread { statusText.text = error.localizedMessage ?: "Could not save marks." }
+            }
+        }.start()
     }
 
     private fun addInput(
