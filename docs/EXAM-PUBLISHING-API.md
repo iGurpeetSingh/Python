@@ -2,6 +2,14 @@
 
 The Guri FastAPI backend stores each paper as a JSON file in the private GitHub repository configured by the environment variables below. No SQL or NoSQL database is used for paper storage.
 
+## Deploy the API service
+
+The repository already contains a Render Blueprint for the `guri-cloud` Docker service. It is configured to deploy after repository checks pass. To create or sync the service, open Render Dashboard → **New → Blueprint**, connect `iGurpeetSingh/Python`, choose the `main` branch, and use the root `render.yaml`.
+
+After creating or syncing the Blueprint, open the `guri-cloud` service → **Environment** and add the two secret values below. Render does not automatically prompt for `sync: false` variables when syncing an already-existing service; add them manually in that case. See the [Render Blueprint specification](https://render.com/docs/blueprint-spec) and [deploy documentation](https://render.com/docs/deploys).
+
+Once the service deploys, copy its exact `https://…onrender.com` URL. Check `GET /api/health` on that URL. Then set `VITE_EXAMS_API_URL` in the Coaching Website Vercel project's Production environment to that exact base URL and redeploy the site.
+
 ## Required Render environment variables
 
 - `PAPER_GITHUB_TOKEN`: GitHub fine-grained personal access token with **Contents: Read and write** permission for the storage repository.
