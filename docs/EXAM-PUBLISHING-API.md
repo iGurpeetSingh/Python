@@ -48,3 +48,39 @@ After setting or changing this variable, redeploy the Coaching website so Vite c
 ## Android admin configuration
 
 The Android Coaching & Exam Control screen must use the same Render base URL and the admin token from `PAPER_ADMIN_TOKEN`. Calls are sent over HTTPS. Never ship a fixed token in the APK; the admin must enter it in the app's protected settings.
+
+## Android paste format
+
+The Android admin screen accepts a plain-text question block (not a JSON paste).
+
+Objective example format (repeat for all 50 questions):
+
+```text
+1. What is the chemical symbol for water?
+A) CO2
+B) H2O
+C) O2
+D) NaCl
+Answer: B
+
+2. ...
+A) ...
+B) ...
+C) ...
+D) ...
+Answer: A
+```
+
+Each objective question must have four options and an explicit `Answer: A`, `Answer: B`, `Answer: C`, or `Answer: D` line. Every objective question is assigned 2 marks.
+
+Written example format:
+
+```text
+1. Explain photosynthesis.
+Marks: 6
+
+2. Define evaporation.
+Marks: 2
+```
+
+Continue until the written paper totals exactly 100 marks. Only the answer key and written marking guide are kept in the private GitHub JSON files; the student API strips those fields from its responses.
