@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
 from backend.app.browser import open_chatgpt, shutdown_browser
 from backend.app.core import open_site
 from backend.app.intents import parse_chatgpt_command
+from backend.app.youtube_upload import upload_from_voice_command
 
 
 def websocket_url(base_url: str) -> str:
@@ -28,6 +29,12 @@ def websocket_url(base_url: str) -> str:
 async def execute_command(command: str) -> dict:
     value = (command or "").strip()
     low = value.casefold()
+
+    if (
+        any(term in low for term in ("youtube", "यूट्यूब", "यू ट्यूब"))
+        and any(term in low for term in ("upload", "अपलोड", "चढ़ा", "चढ़ा", "डाल दो", "डालो"))
+    ):
+        return await upload_from_voice_command(value)
 
     chatgpt = parse_chatgpt_command(value)
     if chatgpt is not None:
