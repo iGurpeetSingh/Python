@@ -90,6 +90,10 @@ async def health():
         "agent": "Guri",
         "cloud_mode": GURI_CLOUD_MODE,
         "pairing_required": GURI_CLOUD_MODE,
+        "paper_api_configured": bool(
+            os.getenv("PAPER_GITHUB_TOKEN", "").strip()
+            and os.getenv("PAPER_ADMIN_TOKEN", "").strip()
+        ),
         "connected_devices": devices,
     }
 
