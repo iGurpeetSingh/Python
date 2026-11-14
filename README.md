@@ -20,6 +20,19 @@ Keep the extracted Guri folder on the PC. Do not open the Vercel-hosted page for
 
 The launcher writes diagnostic logs under `%TEMP%\guri-*.log`. If startup fails, it displays the exact missing dependency or port error instead of silently claiming success.
 
+## YouTube upload by voice (Windows PC)
+
+Guri supports a command such as: "गोरी, मेरी 7 मिनट की video YouTube पर upload करो, title और SEO खुद बनाओ।" The Windows local runtime selects a matching video from Videos/Downloads/Desktop (or `GURI_VIDEO_DIR`), optionally transcribes its audio when `faster-whisper` and FFmpeg are installed, asks the configured local Ollama model for title/description/tags/category, then uploads it as **Unlisted** using the official YouTube Data API. The original video file is not modified.
+
+One-time YouTube setup:
+1. In Google Cloud Console, create/select a project and enable **YouTube Data API v3**.
+2. Configure the OAuth consent screen and create an **OAuth Client ID → Desktop app**.
+3. Download the client JSON and save it outside this repository as `%USERPROFILE%\\.guri\\youtube\\client_secret.json`. Never commit this file or `token.json`.
+4. Install the updated backend requirements and restart `Start-Guri.bat`. On the first upload, a browser opens for Google sign-in and YouTube channel authorization.
+5. Optional: install FFmpeg and `pip install faster-whisper`; the first local transcription downloads a Whisper model. Without it, SEO generation uses the spoken instruction and filename only, not the actual video dialogue.
+
+Set `GURI_VIDEO_DIR` to a dedicated folder to make video selection deterministic. If multiple files match, Guri asks for the filename rather than guessing. The API OAuth project may need Google verification; unverified projects can be restricted to private uploads, so verify the channel visibility after setup. Guri reports success only after YouTube returns a video ID. This feature currently uploads videos and metadata; it does not generate/upload custom thumbnails.
+
 ## Android phone mode (standalone)
 
 The Android companion can listen and run its supported phone commands locally. It does not need a cloud URL, Render URL, pairing code, Windows PC, or USB connection.
