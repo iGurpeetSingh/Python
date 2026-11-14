@@ -98,59 +98,92 @@ object YouTubeUploadManager {
                     response.header("Location") ?: throw IOException("YouTube ने resumable upload URL नहीं दिया।")
                 }
 
-                resolver.openInputStream(uri)?.use { input ->
-                    var offset = 0L
-                    val buffer = ByteArray(CHUNK_BYTES.toInt())
-                    while (offset < info.size) {
-                        val wanted = minOf(buffer.size.toLong(), info.size - offset).toInt()
+                var offset = 0L
+                var retries = 0
+                while (offset < info.size) {
+                    val input = resolver.openInputStream(uri) ?: throw IOException("फोन से वीडियो फाइल पढ़ी नहीं जा सकी।")
+                    val chunk = input.use { stream ->
+                        var skipped = 0L
+                        while (skipped < offset) {
+                            val count = stream.skip(offset - skipped)
+                            if (count <= 0L) {
+                                if (stream.read() < 0) throw IOException("वीडियो के upload offset तक पहुँचना संभव नहीं हुआ।")
+                                skipped++
+                            } else skipped += count
+                        }
+                        val wanted = minOf(CHUNK_BYTES, info.size - offset).toInt()
+                        val bytes = ByteArray(wanted)
                         var read = 0
                         while (read < wanted) {
-                            val count = input.read(buffer, read, wanted - read)
+                            val count = stream.read(bytes, read, wanted - read)
                             if (count < 0) throw IOException("वीडियो पढ़ते समय फाइल अधूरी मिली।")
                             read += count
                         }
-                        val chunk = buffer.copyOf(read)
-                        val end = offset + read - 1
-                        val requestBody: RequestBody = chunk.toRequestBody(info.mimeType.toMediaType())
-                        val request = Request.Builder()
-                            .url(sessionUrl)
-                            .header("Authorization", "Bearer $accessToken")
-                            .header("Content-Range", "bytes $offset-$end/${info.size}")
-                            .put(requestBody)
-                            .build()
+                        if (read == bytes.size) bytes else bytes.copyOf(read)
+                    }
+                    val end = offset + chunk.size - 1
+                    val request = Request.Builder()
+                        .url(sessionUrl)
+                        .header("Authorization", "Bearer $accessToken")
+                        .header("Content-Range", "bytes $offset-$end/${info.size}")
+                        .put(chunk.toRequestBody(info.mimeType.toMediaType()))
+                        .build()
 
-                        var uploaded = false
-                        var attempt = 0
-                        while (!uploaded && attempt < 4) {
-                            try {
-                                client.newCall(request).execute().use { response ->
-                                    when (response.code) {
-                                        200, 201 -> {
-                                            val payload = JSONObject(response.body?.string().orEmpty())
-                                            val id = payload.optString("id")
-                                            if (id.isBlank()) throw IOException("YouTube response में video ID नहीं मिली।")
-                                            onProgress(info.size, info.size)
-                                            onSuccess(UploadResult(id, safeTitle))
-                                            return@Thread
-                                        }
-                                        308 -> uploaded = true
-                                        429, 500, 502, 503, 504 -> throw IOException("Temporary YouTube HTTP ${response.code}")
-                                        else -> {
-                                            val detail = response.body?.string().orEmpty().take(700)
-                                            throw IOException("YouTube upload failed (HTTP ${response.code}): $detail")
-                                        }
-                                    }
+                    try {
+                        client.newCall(request).execute().use { response ->
+                            when (response.code) {
+                                200, 201 -> {
+                                    val payload = JSONObject(response.body?.string().orEmpty())
+                                    val id = payload.optString("id")
+                                    if (id.isBlank()) throw IOException("YouTube response में video ID नहीं मिली।")
+                                    onProgress(info.size, info.size)
+                                    onSuccess(UploadResult(id, safeTitle))
+                                    return@Thread
                                 }
-                            } catch (error: IOException) {
-                                attempt++
-                                if (attempt >= 4) throw error
-                                Thread.sleep(1000L * attempt)
+                                308 -> {
+                                    val range = response.header("Range")
+                                    offset = if (range.isNullOrBlank()) end + 1L
+                                    else Regex("bytes=0-(\\d+)").find(range)?.groupValues?.get(1)?.toLongOrNull()?.plus(1L)
+                                        ?: throw IOException("YouTube ने upload offset का invalid Range लौटाया।")
+                                    retries = 0
+                                    onProgress(offset.coerceAtMost(info.size), info.size)
+                                }
+                                else -> {
+                                    val detail = response.body?.string().orEmpty().take(700)
+                                    throw IOException("YouTube upload failed (HTTP ${response.code}): $detail")
+                                }
                             }
                         }
-                        offset += read
-                        onProgress(offset, info.size)
+                    } catch (error: IOException) {
+                        retries++
+                        if (retries > 4) throw error
+                        // Ask YouTube how many bytes it has already stored before retrying.
+                        val statusRequest = Request.Builder()
+                            .url(sessionUrl)
+                            .header("Authorization", "Bearer $accessToken")
+                            .header("Content-Range", "bytes */${info.size}")
+                            .put(ByteArray(0).toRequestBody(null))
+                            .build()
+                        client.newCall(statusRequest).execute().use { statusResponse ->
+                            if (statusResponse.code == 308) {
+                                val range = statusResponse.header("Range")
+                                offset = if (range.isNullOrBlank()) 0L
+                                else Regex("bytes=0-(\\d+)").find(range)?.groupValues?.get(1)?.toLongOrNull()?.plus(1L)
+                                    ?: throw IOException("YouTube resume offset पढ़ा नहीं जा सका।")
+                            } else if (statusResponse.code == 200 || statusResponse.code == 201) {
+                                val payload = JSONObject(statusResponse.body?.string().orEmpty())
+                                val id = payload.optString("id")
+                                if (id.isBlank()) throw IOException("Upload complete हुआ, लेकिन video ID नहीं मिली।")
+                                onProgress(info.size, info.size)
+                                onSuccess(UploadResult(id, safeTitle))
+                                return@Thread
+                            } else {
+                                throw IOException("YouTube upload resume जाँच विफल (HTTP ${statusResponse.code})")
+                            }
+                        }
+                        Thread.sleep(800L * retries)
                     }
-                } ?: throw IOException("फोन से वीडियो फाइल पढ़ी नहीं जा सकी।")
+                }
                 throw IOException("Upload पूरा हुआ लेकिन YouTube ने अंतिम video ID नहीं लौटाई।")
             } catch (error: Exception) {
                 onError(error.message ?: "YouTube upload में अज्ञात त्रुटि आई।")
