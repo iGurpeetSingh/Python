@@ -84,3 +84,14 @@ Marks: 2
 ```
 
 Continue until the written paper totals exactly 100 marks. Only the answer key and written marking guide are kept in the private GitHub JSON files; the student API strips those fields from its responses.
+
+## Student exam lifecycle
+
+1. The website calls `POST /api/exams/{objective|written}/attempts/start` with `studentName` and `rollNumber`. The service only starts an attempt during the scheduled exam window.
+2. The response returns an `attemptId`, one-time `receiptToken`, the server deadline, and the safe student paper (without answer keys).
+3. The website runs the countdown to the server deadline and posts answers to `POST /api/exams/{objective|written}/attempts/{attemptId}/submit` with the `X-Exam-Receipt-Token` header.
+4. Objective answers are scored on the server. The response contains score and correct/incorrect/unanswered counts.
+5. Written answers are stored with status `awaiting_marking`. A teacher can grade them through `POST /api/admin/exams/written/attempts/{attemptId}/grade` using the admin token and a `marks` object keyed by zero-based question index.
+6. A private result receipt can be read from `GET /api/exams/{objective|written}/attempts/{attemptId}/result` with the same `X-Exam-Receipt-Token` header.
+
+Each attempt is stored as its own private JSON file under `data/exams/attempts/{objective|written}/`. No database is used. The student name and roll number are currently entered by the student in the exam page because this Coaching project has no existing authenticated student-session API. Do not treat self-entered details as verified identity.
