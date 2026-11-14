@@ -16,6 +16,7 @@ from .core import (
 from .browser import open_chatgpt, shutdown_browser
 from .device_hub import device_hub
 from .intents import parse_chatgpt_command
+from .papers import router as papers_router
 
 
 class Chat(BaseModel):
@@ -77,6 +78,8 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
+
+app.include_router(papers_router)
 
 
 @app.get("/api/health")
