@@ -5,7 +5,9 @@ Credentials are deliberately stored outside the repository. See README for setup
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
+import tempfile
 import os
 import re
 import subprocess
@@ -135,11 +137,52 @@ def _transcribe(path: Path) -> str:
             pass
 
 
-async def _make_metadata(path: Path, command: str, transcript: str) -> dict[str, Any]:
+async def _describe_video_frames(path: Path) -> str:
+    """Sample video frames and ask a local Ollama vision model for a factual summary."""
+    ffmpeg = os.getenv("GURI_FFMPEG", "ffmpeg")
+    model = os.getenv("GURI_YOUTUBE_VISION_MODEL", "llava:7b")
+    try:
+        with tempfile.TemporaryDirectory(prefix="guri-youtube-") as temp_dir:
+            pattern = str(Path(temp_dir) / "frame-%02d.jpg")
+            subprocess.run(
+                [ffmpeg, "-y", "-i", str(path), "-vf",
+                 "fps=1/45,scale=640:-1:force_original_aspect_ratio=decrease",
+                 "-frames:v", "8", "-q:v", "5", pattern],
+                capture_output=True, timeout=180, check=True,
+            )
+            frames = sorted(Path(temp_dir).glob("frame-*.jpg"))
+            if not frames:
+                return ""
+            images = [base64.b64encode(frame.read_bytes()).decode("ascii") for frame in frames]
+            async with httpx.AsyncClient(timeout=180) as client:
+                response = await client.post(
+                    OLLAMA_BASE_URL + "/api/chat",
+                    json={
+                        "model": model,
+                        "stream": False,
+                        "messages": [{
+                            "role": "user",
+                            "content": (
+                                "Describe the visual subject, actions, setting, and on-screen text "
+                                "visible across these sampled video frames. Be factual; mark uncertainty "
+                                "and do not invent names or events."
+                            ),
+                            "images": images,
+                        }],
+                    },
+                )
+                response.raise_for_status()
+                return str(response.json().get("message", {}).get("content", "")).strip()[:6000]
+    except Exception:
+        # A missing/unavailable vision model must not make the upload pretend it saw the video.
+        return ""
+
+
+async def _make_metadata(path: Path, command: str, transcript: str, visual_summary: str) -> dict[str, Any]:
     context = (
         f"Spoken upload instruction: {command}\n"
         f"Video filename: {path.name}\n"
-        f"Video transcript (may be empty): {transcript or '[not available]'}"
+        f"Video transcript (may be empty): {transcript or '[not available]'}\\n"\n        f"Visual frame analysis (may be empty): {visual_summary or '[not available]'}"
     )
     prompt = (
         "Create accurate YouTube metadata for this video. Do not invent facts not supported by "
@@ -248,5 +291,5 @@ async def upload_from_voice_command(command: str) -> dict[str, Any]:
         "duration_seconds": _duration_seconds(path),
         "metadata": metadata,
         **uploaded,
-        "transcript_used": bool(transcript),
+        "transcript_used": bool(transcript),\n        "visual_analysis_used": bool(visual_summary),
     }
