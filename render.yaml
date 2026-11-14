@@ -13,5 +13,13 @@ services:
         value: "true"
       - key: GURI_PAIRING_CODE
         generateValue: true
+      - key: PAPER_GITHUB_TOKEN
+        sync: false
+      - key: PAPER_ADMIN_TOKEN
+        sync: false
+      - key: PAPER_STORAGE_REPO
+        value: "iGurpeetSingh/Python"
+      - key: PAPER_STORAGE_BRANCH
+        value: "main"
       - key: PYTHONUNBUFFERED
         value: "1"
