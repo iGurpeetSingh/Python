@@ -84,6 +84,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             text = "फोन Control चालू करें"
             setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
         }
+
+        val examControlButton = Button(this).apply {
+            text = "Coaching & Exam Control"
+            setOnClickListener { startActivity(Intent(this@MainActivity, CoachingExamActivity::class.java)) }
+        }
         val help = TextView(this).apply {
             text = "पहली बार केवल दो permissions दें:\n1. Microphone permission\n2. Accessibility में Guri Voice Assistant ON\n\nकोई backend URL, pairing code या Render link नहीं चाहिए।"
             textSize = 13f
@@ -96,6 +101,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         layout.addView(hint)
         layout.addView(micButton)
         layout.addView(accessibilityButton)
+        layout.addView(examControlButton)
         layout.addView(help)
         setContentView(layout)
         updateAccessibilityButton()
