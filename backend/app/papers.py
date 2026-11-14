@@ -1,6 +1,7 @@
 """Paper publishing API backed by private GitHub JSON files (no database)."""
 from __future__ import annotations
 
+import asyncio
 import base64
 import copy
 import hashlib
@@ -404,6 +405,52 @@ async def get_exam_attempt_result(
     ):
         raise HTTPException(401, "Exam receipt token is missing or invalid.")
     return {"ok": True, **_attempt_result(attempt)}
+
+
+@router.get("/api/admin/exams/{paper_type}/attempts")
+async def list_exam_attempts(
+    paper_type: str,
+    x_paper_admin_token: str | None = Header(default=None),
+):
+    token, repository, branch, _ = _require_admin(x_paper_admin_token)
+    _file_path(paper_type)
+    directory = f"data/exams/attempts/{paper_type}"
+    url = f"{GITHUB_API}/repos/{repository}/contents/{directory}"
+    async with httpx.AsyncClient(timeout=20) as client:
+        response = await client.get(
+            url, headers=_github_headers(token), params={"ref": branch}
+        )
+    if response.status_code == 404:
+        return {"items": []}
+    if response.status_code != 200:
+        raise HTTPException(502, "Could not list exam attempts from GitHub storage.")
+    entries = response.json()
+    if not isinstance(entries, list):
+        raise HTTPException(502, "Exam attempts storage path is not a directory.")
+    paths = [
+        item.get("path")
+        for item in entries
+        if isinstance(item, dict)
+        and item.get("type") == "file"
+        and str(item.get("name", "")).endswith(".json")
+    ][:100]
+    async def load_attempt(path: str):
+        document, _ = await _read_json_path(path)
+        if not document:
+            return None
+        snapshot = document.get("paperSnapshot") or {}
+        questions = snapshot.get("questions") if paper_type == "objective" else snapshot.get("writtenQuestions")
+        return {
+            **_attempt_result(document),
+            "answers": document.get("answers", {}),
+            "questions": questions or [],
+            "gradedAt": document.get("gradedAt"),
+            "awardedMarks": document.get("awardedMarks", {}),
+        }
+    loaded = await asyncio.gather(*(load_attempt(path) for path in paths))
+    items = [item for item in loaded if item is not None]
+    items.sort(key=lambda item: item.get("startedAt", ""), reverse=True)
+    return {"items": items}
 
 
 @router.post("/api/admin/exams/written/attempts/{attempt_id}/grade")
