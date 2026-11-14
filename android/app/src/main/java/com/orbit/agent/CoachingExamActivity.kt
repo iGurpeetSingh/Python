@@ -281,6 +281,10 @@ class CoachingExamActivity : Activity() {
                 addResultText(card, "Graded: $score/${attempt.optInt("totalMarks", 100)}", 11f, true)
                 continue
             }
+            if (state != "awaiting_marking") {
+                addResultText(card, "Waiting for student submission.", 10f)
+                continue
+            }
             addResultText(card, "Status: $state · Submitted: ${attempt.optString("submittedAt", "—")}", 10f)
             val questions = attempt.optJSONArray("questions") ?: JSONArray()
             val answers = attempt.optJSONObject("answers") ?: JSONObject()
