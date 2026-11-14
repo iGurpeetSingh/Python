@@ -22,14 +22,14 @@ The launcher writes diagnostic logs under `%TEMP%\guri-*.log`. If startup fails,
 
 ## YouTube upload by voice (Windows PC)
 
-Guri supports a command such as: "गोरी, मेरी 7 मिनट की video YouTube पर upload करो, title और SEO खुद बनाओ।" The Windows local runtime selects a matching video from Videos/Downloads/Desktop (or `GURI_VIDEO_DIR`), uses FFprobe (included with FFmpeg) to match the spoken duration and optionally transcribes audio when `faster-whisper` is installed, asks the configured local Ollama model for title/description/tags/category, then uploads it as **Unlisted** using the official YouTube Data API. The original video file is not modified.
+Guri supports a command such as: "गोरी, मेरी 7 मिनट की video YouTube पर upload करो, title और SEO खुद बनाओ।" The Windows local runtime selects a matching video from Videos/Downloads/Desktop (or `GURI_VIDEO_DIR`), uses FFprobe (included with FFmpeg) to match the spoken duration, analyzes sampled frames with local Ollama vision model `llava:7b`, optionally transcribes audio when `faster-whisper` is installed, and generates title/description/tags/category with the configured local Ollama text model, then uploads it as **Unlisted** using the official YouTube Data API. The original video file is not modified.
 
 One-time YouTube setup:
 1. In Google Cloud Console, create/select a project and enable **YouTube Data API v3**.
 2. Configure the OAuth consent screen and create an **OAuth Client ID → Desktop app**.
 3. Download the client JSON and save it outside this repository as `%USERPROFILE%\\.guri\\youtube\\client_secret.json`. Never commit this file or `token.json`.
 4. Install the updated backend requirements and restart `Start-Guri.bat`. On the first upload, a browser opens for Google sign-in and YouTube channel authorization.
-5. Install FFmpeg (for FFprobe duration matching and frame extraction). Run `ollama pull llava:7b` for visual analysis. Optional: `pip install faster-whisper`; the first local transcription downloads a Whisper model. Without it, SEO generation uses the spoken instruction and filename only, not the actual video dialogue.
+5. Install FFmpeg (for FFprobe duration matching and frame extraction). Run `ollama pull llava:7b` for visual analysis. Optional: `pip install faster-whisper`; the first local transcription downloads a Whisper model. Without it, audio dialogue is not transcribed; sampled video frames are still analyzed by the vision model.
 
 Set `GURI_VIDEO_DIR` to a dedicated folder to make video selection deterministic. If multiple files match, Guri asks for the filename rather than guessing. The API OAuth project may need Google verification; unverified projects can be restricted to private uploads, so verify the channel visibility after setup. Guri reports success only after YouTube returns a video ID. This feature currently uploads videos and metadata; it does not generate/upload custom thumbnails.
 
