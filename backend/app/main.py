@@ -16,6 +16,7 @@ from .core import (
 from .browser import open_chatgpt, shutdown_browser
 from .device_hub import device_hub
 from .intents import parse_chatgpt_command
+from .youtube_upload import upload_from_voice_command
 
 
 class Chat(BaseModel):
@@ -184,93 +185,100 @@ async def chat(
 
     save("user", msg)
     try:
-        chatgpt_command = parse_chatgpt_command(msg)
-        if chatgpt_command is not None:
-            result = await open_chatgpt(
-                chatgpt_command.message,
-                search_first=chatgpt_command.search_first,
-            )
-
-        elif (
-            ("instagram" in low or "इंस्टाग्राम" in low)
-            and any(word in low for word in ["open", "launch", "खोल", "ओपन", "start"])
-        ):
-            asks_reels = "reel" in low or "रील" in low
-            asks_scroll = any(word in low for word in ["scroll", "स्क्रॉल", "स्क्रोल", "अगली"])
-            if asks_reels and asks_scroll:
+        is_youtube_upload = (
+            any(x in low for x in ("youtube", "यूट्यूब", "यू ट्यूब"))
+            and any(x in low for x in ("upload", "अपलोड", "चढ़ा", "चढ़ा", "डाल दो", "डालो"))
+        )
+        if is_youtube_upload:
+            result = await upload_from_voice_command(msg)
+        else:
+            chatgpt_command = parse_chatgpt_command(msg)
+            if chatgpt_command is not None:
+                result = await open_chatgpt(
+                    chatgpt_command.message,
+                    search_first=chatgpt_command.search_first,
+                )
+    
+            elif (
+                ("instagram" in low or "इंस्टाग्राम" in low)
+                and any(word in low for word in ["open", "launch", "खोल", "ओपन", "start"])
+            ):
+                asks_reels = "reel" in low or "रील" in low
+                asks_scroll = any(word in low for word in ["scroll", "स्क्रॉल", "स्क्रोल", "अगली"])
+                if asks_reels and asks_scroll:
+                    match = re.search(r"(\d+)", low)
+                    count = max(1, min(20, int(match.group(1)))) if match else 3
+                    result = await instagram_reels_scroll(count)
+                else:
+                    result = {
+                        "reply": await instagram_open(),
+                        "action": "instagram_open",
+                        "status": "completed",
+                    }
+    
+            elif any(x in low for x in ["scroll reels", "reels scroll", "रील स्क्रोल", "रील्स स्क्रोल", "रील स्क्रॉल", "रील्स स्क्रॉल"]):
                 match = re.search(r"(\d+)", low)
                 count = max(1, min(20, int(match.group(1)))) if match else 3
-                result = await instagram_reels_scroll(count)
-            else:
                 result = {
-                    "reply": await instagram_open(),
-                    "action": "instagram_open",
+                    "reply": await reels_scroll(count),
+                    "action": "reels_scroll",
                     "status": "completed",
                 }
-
-        elif any(x in low for x in ["scroll reels", "reels scroll", "रील स्क्रोल", "रील्स स्क्रोल", "रील स्क्रॉल", "रील्स स्क्रॉल"]):
-            match = re.search(r"(\d+)", low)
-            count = max(1, min(20, int(match.group(1)))) if match else 3
-            result = {
-                "reply": await reels_scroll(count),
-                "action": "reels_scroll",
-                "status": "completed",
-            }
-
-        elif (
-            "amazon" in low or "अमेज़न" in low or "अमेज़ॉन" in low
-        ) and any(word in low for word in ["open", "खोल", "ओपन", "start"]):
-            result = {
-                "reply": await open_site("https://www.amazon.in"),
-                "action": "open",
-                "status": "completed",
-            }
-
-        elif ("google" in low or "गूगल" in low) and any(word in low for word in ["open", "खोल", "ओपन"]):
-            result = {
-                "reply": await open_site("https://www.google.com"),
-                "action": "open",
-                "status": "completed",
-            }
-
-        elif ("youtube" in low or "यूट्यूब" in low) and any(word in low for word in ["open", "खोल", "ओपन"]):
-            result = {
-                "reply": await open_site("https://www.youtube.com"),
-                "action": "open",
-                "status": "completed",
-            }
-
-        elif "amazon" in low and any(x in low for x in ["search", "find", "watch", "watches", "घड़ी", "खोज", "सर्च"]):
-            match = re.search(r"(?:search|find|खोजो|सर्च करो)\s*(?:for)?\s*(.+)", msg, flags=re.I)
-            query = match.group(1).strip() if match else "watches"
-            rows = await search_web(query, True)
-            result = {
-                "reply": "Amazon results sorted by displayed price where available. Verify current price on each product page.",
-                "action": "amazon_search",
-                "results": rows,
-                "status": "completed" if rows else "partial",
-            }
-
-        elif any(x in low for x in ["google पर सर्च", "search google for", "गूगल पर खोज"]):
-            match = re.search(r"(?:search google for|google पर सर्च करो|गूगल पर खोजो)\s*(.+)", msg, flags=re.I)
-            query = match.group(1).strip() if match else msg
-            rows = await search_web(query)
-            result = {
-                "reply": "\n".join(
-                    x["title"] + "\n" + x["snippet"] + "\n" + x["url"] for x in rows
-                ) or "No readable results.",
-                "action": "google_search",
-                "results": rows,
-                "status": "completed" if rows else "partial",
-            }
-
-        else:
-            answer = await local_answer(msg)
-            result = {
-                "reply": answer or "Local AI model is not available. Install Ollama and run: ollama pull qwen2.5:3b",
-                "action": "local_ai",
-                "status": "completed" if answer else "needs_setup",
-            }
+    
+            elif (
+                "amazon" in low or "अमेज़न" in low or "अमेज़ॉन" in low
+            ) and any(word in low for word in ["open", "खोल", "ओपन", "start"]):
+                result = {
+                    "reply": await open_site("https://www.amazon.in"),
+                    "action": "open",
+                    "status": "completed",
+                }
+    
+            elif ("google" in low or "गूगल" in low) and any(word in low for word in ["open", "खोल", "ओपन"]):
+                result = {
+                    "reply": await open_site("https://www.google.com"),
+                    "action": "open",
+                    "status": "completed",
+                }
+    
+            elif ("youtube" in low or "यूट्यूब" in low) and any(word in low for word in ["open", "खोल", "ओपन"]):
+                result = {
+                    "reply": await open_site("https://www.youtube.com"),
+                    "action": "open",
+                    "status": "completed",
+                }
+    
+            elif "amazon" in low and any(x in low for x in ["search", "find", "watch", "watches", "घड़ी", "खोज", "सर्च"]):
+                match = re.search(r"(?:search|find|खोजो|सर्च करो)\s*(?:for)?\s*(.+)", msg, flags=re.I)
+                query = match.group(1).strip() if match else "watches"
+                rows = await search_web(query, True)
+                result = {
+                    "reply": "Amazon results sorted by displayed price where available. Verify current price on each product page.",
+                    "action": "amazon_search",
+                    "results": rows,
+                    "status": "completed" if rows else "partial",
+                }
+    
+            elif any(x in low for x in ["google पर सर्च", "search google for", "गूगल पर खोज"]):
+                match = re.search(r"(?:search google for|google पर सर्च करो|गूगल पर खोजो)\s*(.+)", msg, flags=re.I)
+                query = match.group(1).strip() if match else msg
+                rows = await search_web(query)
+                result = {
+                    "reply": "\n".join(
+                        x["title"] + "\n" + x["snippet"] + "\n" + x["url"] for x in rows
+                    ) or "No readable results.",
+                    "action": "google_search",
+                    "results": rows,
+                    "status": "completed" if rows else "partial",
+                }
+    
+            else:
+                answer = await local_answer(msg)
+                result = {
+                    "reply": answer or "Local AI model is not available. Install Ollama and run: ollama pull qwen2.5:3b",
+                    "action": "local_ai",
+                    "status": "completed" if answer else "needs_setup",
+                }
 
     except HTTPException:
         raise
