@@ -93,5 +93,6 @@ Continue until the written paper totals exactly 100 marks. Only the answer key a
 4. Objective answers are scored on the server. The response contains score and correct/incorrect/unanswered counts.
 5. Written answers are stored with status `awaiting_marking`. A teacher can grade them through `POST /api/admin/exams/written/attempts/{attemptId}/grade` using the admin token and a `marks` object keyed by zero-based question index.
 6. A private result receipt can be read from `GET /api/exams/{objective|written}/attempts/{attemptId}/result` with the same `X-Exam-Receipt-Token` header.
+7. A teacher/admin can load submissions from `GET /api/admin/exams/{objective|written}/attempts` with `X-Paper-Admin-Token`. Written attempts can be graded using the grading endpoint above. The endpoint only returns data after admin-token verification.
 
 Each attempt is stored as its own private JSON file under `data/exams/attempts/{objective|written}/`. No database is used. The student name and roll number are currently entered by the student in the exam page because this Coaching project has no existing authenticated student-session API. Do not treat self-entered details as verified identity.
