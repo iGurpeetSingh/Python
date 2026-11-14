@@ -5,6 +5,8 @@ on:
     paths:
       - "backend/app/**"
       - "backend/tests/**"
+      - "render.yaml"
+      - "docs/EXAM-PUBLISHING-API.md"
       - ".github/workflows/python-paper-api.yml"
   pull_request:
     paths:
