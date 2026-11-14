@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import base64
 import copy
+import hashlib
 import json
 import os
 import re
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
+import math
 
 import httpx
 from fastapi import APIRouter, Header, HTTPException, Body
@@ -59,9 +61,8 @@ def _github_headers(token: str) -> dict[str, str]:
     }
 
 
-async def _read_document(paper_type: str) -> tuple[dict[str, Any] | None, str | None]:
+async def _read_json_path(path: str) -> tuple[dict[str, Any] | None, str | None]:
     token, repository, branch, _ = _settings()
-    path = _file_path(paper_type)
     url = f"{GITHUB_API}/repos/{repository}/contents/{path}"
     async with httpx.AsyncClient(timeout=20) as client:
         response = await client.get(
@@ -79,21 +80,24 @@ async def _read_document(paper_type: str) -> tuple[dict[str, Any] | None, str | 
         raw = base64.b64decode(result["content"]).decode("utf-8")
         document = json.loads(raw)
     except (KeyError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise HTTPException(502, "Stored paper JSON is invalid.") from exc
+        raise HTTPException(502, "Stored JSON file is invalid.") from exc
     if not isinstance(document, dict):
-        raise HTTPException(502, "Stored paper JSON must be an object.")
+        raise HTTPException(502, "Stored JSON file must contain an object.")
     return document, result.get("sha")
 
 
-async def _write_document(paper_type: str, document: dict[str, Any]) -> None:
+async def _write_json_path(
+    path: str,
+    document: dict[str, Any],
+    message: str,
+    sha: str | None = None,
+) -> None:
     token, repository, branch, _ = _settings()
-    path = _file_path(paper_type)
-    _, sha = await _read_document(paper_type)
     encoded = base64.b64encode(
         json.dumps(document, ensure_ascii=False, indent=2).encode("utf-8")
     ).decode("ascii")
     body: dict[str, Any] = {
-        "message": f"{'Publish' if document.get('published') else 'Unpublish'} {paper_type} exam paper",
+        "message": message,
         "content": encoded,
         "branch": branch,
     }
@@ -113,6 +117,56 @@ async def _write_document(paper_type: str, document: dict[str, Any]) -> None:
             detail=f"{detail} Confirm the token has Contents: Read and write permission.",
         )
 
+
+async def _read_document(paper_type: str) -> tuple[dict[str, Any] | None, str | None]:
+    return await _read_json_path(_file_path(paper_type))
+
+
+async def _write_document(paper_type: str, document: dict[str, Any]) -> None:
+    _, sha = await _read_document(paper_type)
+    state = "Publish" if document.get("published") else "Unpublish"
+    await _write_json_path(
+        _file_path(paper_type),
+        document,
+        f"{state} {paper_type} exam paper",
+        sha,
+    )
+
+
+def _attempt_path(paper_type: str, attempt_id: str) -> str:
+    _file_path(paper_type)
+    if not re.fullmatch(r"[a-f0-9]{32}", attempt_id):
+        raise HTTPException(404, "Attempt not found.")
+    return f"data/exams/attempts/{paper_type}/{attempt_id}.json"
+
+
+def _parse_utc(value: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(502, "The stored exam schedule is invalid.") from exc
+    if parsed.tzinfo is None:
+        raise HTTPException(502, "The stored exam schedule must include a timezone.")
+    return parsed.astimezone(timezone.utc)
+
+
+def _attempt_result(document: dict[str, Any]) -> dict[str, Any]:
+    # Never return the stored receipt hash, answer key snapshot, or submitted answers.
+    return {
+        "attemptId": document["id"],
+        "paperType": document["paperType"],
+        "title": document["title"],
+        "studentName": document["studentName"],
+        "rollNumber": document["rollNumber"],
+        "startedAt": document["startedAt"],
+        "submittedAt": document.get("submittedAt"),
+        "status": document["status"],
+        "score": document.get("score"),
+        "totalMarks": document["totalMarks"],
+        "correctCount": document.get("correctCount"),
+        "incorrectCount": document.get("incorrectCount"),
+        "unansweredCount": document.get("unansweredCount"),
+    }
 
 def _validate_paper(paper_type: str, payload: dict[str, Any]) -> dict[str, Any]:
     if paper_type not in PAPER_TYPES:
@@ -185,6 +239,208 @@ def _validate_paper(paper_type: str, payload: dict[str, Any]) -> dict[str, Any]:
             raise HTTPException(422, "Written Exam total must be exactly 100 marks.")
     return cleaned
 
+
+
+@router.post("/api/exams/{paper_type}/attempts/start")
+async def start_exam_attempt(
+    paper_type: str,
+    payload: dict[str, Any] = Body(...),
+):
+    _settings()
+    _file_path(paper_type)
+    paper, paper_sha = await _read_document(paper_type)
+    if not paper or paper.get("published") is not True:
+        raise HTTPException(404, "This exam is not published.")
+
+    now = datetime.now(timezone.utc)
+    start_at = _parse_utc(paper["startAt"])
+    deadline = start_at + timedelta(minutes=int(paper["durationMinutes"]))
+    if now < start_at:
+        raise HTTPException(409, "This exam has not started yet.")
+    if now >= deadline:
+        raise HTTPException(410, "The scheduled exam time has ended.")
+
+    student_name = str(payload.get("studentName", "")).strip()
+    roll_number = str(payload.get("rollNumber", "")).strip()
+    if not student_name or len(student_name) > 120:
+        raise HTTPException(422, "Student name is required (maximum 120 characters).")
+    if not roll_number or len(roll_number) > 40:
+        raise HTTPException(422, "Roll number is required (maximum 40 characters).")
+
+    attempt_id = secrets.token_hex(16)
+    receipt_token = secrets.token_urlsafe(32)
+    total_marks = 100
+    attempt = {
+        "id": attempt_id,
+        "paperType": paper_type,
+        "paperTitle": paper["title"],
+        "title": paper["title"],
+        "studentName": student_name,
+        "rollNumber": roll_number,
+        "startedAt": now.isoformat(),
+        "expiresAt": deadline.isoformat(),
+        "submittedAt": None,
+        "status": "in_progress",
+        "score": None,
+        "totalMarks": total_marks,
+        "receiptHash": hashlib.sha256(receipt_token.encode("utf-8")).hexdigest(),
+        "answers": {},
+        "paperSnapshot": copy.deepcopy(paper),
+        "paperStorageSha": paper_sha,
+    }
+    await _write_json_path(
+        _attempt_path(paper_type, attempt_id),
+        attempt,
+        f"Start {paper_type} exam attempt {attempt_id}",
+    )
+    return {
+        "ok": True,
+        "attemptId": attempt_id,
+        "receiptToken": receipt_token,
+        "title": paper["title"],
+        "paperType": paper_type,
+        "startedAt": attempt["startedAt"],
+        "expiresAt": attempt["expiresAt"],
+        "paper": _student_safe(paper),
+    }
+
+
+@router.post("/api/exams/{paper_type}/attempts/{attempt_id}/submit")
+async def submit_exam_attempt(
+    paper_type: str,
+    attempt_id: str,
+    payload: dict[str, Any] = Body(...),
+    x_exam_receipt_token: str | None = Header(default=None),
+):
+    _settings()
+    path = _attempt_path(paper_type, attempt_id)
+    attempt, sha = await _read_json_path(path)
+    if not attempt:
+        raise HTTPException(404, "Exam attempt not found.")
+    expected = attempt.get("receiptHash", "")
+    if not x_exam_receipt_token or not secrets.compare_digest(
+        hashlib.sha256(x_exam_receipt_token.encode("utf-8")).hexdigest(), expected
+    ):
+        raise HTTPException(401, "Exam receipt token is missing or invalid.")
+    if attempt.get("submittedAt"):
+        return {"ok": True, **_attempt_result(attempt)}
+    if datetime.now(timezone.utc) >= _parse_utc(attempt["expiresAt"]):
+        raise HTTPException(410, "The exam time has ended. The attempt can no longer be submitted.")
+
+    answers = payload.get("answers", {})
+    if not isinstance(answers, dict):
+        raise HTTPException(422, "answers must be an object indexed by question number.")
+    paper = attempt.get("paperSnapshot")
+    if not isinstance(paper, dict):
+        raise HTTPException(502, "The paper snapshot for this attempt is missing.")
+
+    submitted: dict[str, Any] = {}
+    if paper_type == "objective":
+        questions = paper.get("questions") or []
+        correct = 0
+        incorrect = 0
+        unanswered = 0
+        for index, question in enumerate(questions):
+            value = answers.get(str(index), answers.get(index))
+            if value is None or value == "":
+                unanswered += 1
+                continue
+            if isinstance(value, bool) or not isinstance(value, int) or value not in range(4):
+                raise HTTPException(422, f"Answer for question {index + 1} must be an option index from 0 to 3.")
+            submitted[str(index)] = value
+            if value == int(question["correctIndex"]):
+                correct += 1
+            else:
+                incorrect += 1
+        score = correct * 2
+        attempt.update({
+            "answers": submitted,
+            "score": score,
+            "correctCount": correct,
+            "incorrectCount": incorrect,
+            "unansweredCount": unanswered,
+            "status": "evaluated",
+        })
+    else:
+        questions = paper.get("writtenQuestions") or []
+        for index, _question in enumerate(questions):
+            value = answers.get(str(index), answers.get(index, ""))
+            if not isinstance(value, str):
+                raise HTTPException(422, f"Answer for question {index + 1} must be text.")
+            if len(value) > 20000:
+                raise HTTPException(422, f"Answer for question {index + 1} is too long.")
+            submitted[str(index)] = value.strip()
+        attempt.update({
+            "answers": submitted,
+            "score": None,
+            "status": "awaiting_marking",
+        })
+
+    now = datetime.now(timezone.utc)
+    attempt["submittedAt"] = now.isoformat()
+    attempt["paperSnapshot"] = paper
+    await _write_json_path(
+        path,
+        attempt,
+        f"Submit {paper_type} exam attempt {attempt_id}",
+        sha,
+    )
+    return {"ok": True, **_attempt_result(attempt)}
+
+
+@router.get("/api/exams/{paper_type}/attempts/{attempt_id}/result")
+async def get_exam_attempt_result(
+    paper_type: str,
+    attempt_id: str,
+    x_exam_receipt_token: str | None = Header(default=None),
+):
+    _settings()
+    attempt, _ = await _read_json_path(_attempt_path(paper_type, attempt_id))
+    if not attempt:
+        raise HTTPException(404, "Exam attempt not found.")
+    expected = attempt.get("receiptHash", "")
+    if not x_exam_receipt_token or not secrets.compare_digest(
+        hashlib.sha256(x_exam_receipt_token.encode("utf-8")).hexdigest(), expected
+    ):
+        raise HTTPException(401, "Exam receipt token is missing or invalid.")
+    return {"ok": True, **_attempt_result(attempt)}
+
+
+@router.post("/api/admin/exams/written/attempts/{attempt_id}/grade")
+async def grade_written_attempt(
+    attempt_id: str,
+    payload: dict[str, Any] = Body(...),
+    x_paper_admin_token: str | None = Header(default=None),
+):
+    _require_admin(x_paper_admin_token)
+    path = _attempt_path("written", attempt_id)
+    attempt, sha = await _read_json_path(path)
+    if not attempt:
+        raise HTTPException(404, "Written exam attempt not found.")
+    if attempt.get("status") not in {"awaiting_marking", "graded"}:
+        raise HTTPException(409, "This written attempt is not awaiting evaluation.")
+    paper = attempt.get("paperSnapshot") or {}
+    questions = paper.get("writtenQuestions") or []
+    awarded = payload.get("marks", {})
+    if not isinstance(awarded, dict):
+        raise HTTPException(422, "marks must be an object indexed by question number.")
+    normalized: dict[str, int] = {}
+    total = 0
+    for index, question in enumerate(questions):
+        raw = awarded.get(str(index), 0)
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not math.isfinite(raw):
+            raise HTTPException(422, f"Marks for question {index + 1} must be numeric.")
+        mark = int(raw)
+        if mark != raw or mark < 0 or mark > int(question["marks"]):
+            raise HTTPException(422, f"Marks for question {index + 1} must be a whole number from 0 to {question['marks']}.")
+        normalized[str(index)] = mark
+        total += mark
+    attempt["awardedMarks"] = normalized
+    attempt["score"] = total
+    attempt["status"] = "graded"
+    attempt["gradedAt"] = datetime.now(timezone.utc).isoformat()
+    await _write_json_path(path, attempt, f"Grade written exam attempt {attempt_id}", sha)
+    return {"ok": True, **_attempt_result(attempt)}
 
 def _student_safe(document: dict[str, Any]) -> dict[str, Any]:
     public = copy.deepcopy(document)
