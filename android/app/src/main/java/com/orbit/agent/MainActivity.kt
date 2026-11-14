@@ -218,17 +218,19 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             (pendingYoutubeDurationMs + tolerance).toString()
         )
         val matches = mutableListOf<Pair<Uri, String>>()
-        contentResolver.query(
-            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-            projection, selection, args,
-            "${MediaStore.Video.Media.DATE_ADDED} DESC"
-        )?.use { cursor ->
-            val idCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
-            val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)
-            while (cursor.moveToNext()) {
-                val id = cursor.getLong(idCol)
-                val name = cursor.getString(nameCol) ?: "Video"
-                matches += ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id) to name
+        try {
+            contentResolver.query(
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                projection, selection, args,
+                "${MediaStore.Video.Media.DATE_ADDED} DESC"
+            )?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
+                val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(idCol)
+                    val name = cursor.getString(nameCol) ?: "Video"
+                    matches += ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id) to name
+                }
             }
         } catch (error: SecurityException) {
             status.text = "फोन की वीडियो सूची पढ़ने की अनुमति नहीं मिली।"
@@ -300,8 +302,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     try {
                         contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     } catch (_: Exception) {}
-                    val name = YouTubeUploadManager.inspect(contentResolver, uri).name
-                    prepareYoutubeUpload(uri, name)
+                    try {
+                        val name = YouTubeUploadManager.inspect(contentResolver, uri).name
+                        prepareYoutubeUpload(uri, name)
+                    } catch (error: Exception) {
+                        showYoutubeError(error.message ?: "चुनी हुई वीडियो पढ़ी नहीं जा सकी।")
+                    }
                 } else {
                     showYoutubeError("वीडियो चयन रद्द कर दिया गया।")
                 }
