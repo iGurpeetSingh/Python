@@ -20,7 +20,7 @@ async function readApi(response) {
 }
 
 function cleanCommand(value) {
-  return (value || "").replace(/^\s*(?:गुरी|guri)\s*[,،:;-]?\s*/i, "").trim();
+  return (value || "").replace(/^\s*(?:गोरी|गुरी|gori|guri)\s*[,،:;-]?\s*/i, "").trim();
 }
 
 export default function App() {
@@ -140,7 +140,7 @@ export default function App() {
       recognition.continuous = false;
       recognition.interimResults = false;
       recognition.maxAlternatives = 1;
-      recognition.onstart = () => setStatus("गुरी सुन रही है…");
+      recognition.onstart = () => setStatus("गोरी सुन रही है…");
       recognition.onresult = (event) => {
         const phrase = event.results?.[event.resultIndex]?.[0]?.transcript?.trim() || "";
         if (phrase) {
@@ -215,7 +215,7 @@ export default function App() {
       <p className="guri-hint">बस बोलिए — Guri आपके PC पर काम करेगी</p>
       <button className={"guri-mic" + (listening ? " active" : "")} onClick={toggleListening} disabled={working || !apiReady}>
         {listening ? <MicOff size={23} /> : <Mic size={23} />}
-        {listening ? "सुनना बंद करें" : "Guri को सुनाएँ"}
+        {listening ? "सुनना बंद करें" : "गोरी को सुनाएँ"}
       </button>
       <section className="guri-runtime">
         <div className="runtime-heading"><Terminal size={16}/> GURI LOCAL RUNTIME <span className={apiReady ? "runtime-online" : "runtime-offline"}><Wifi size={13}/> {apiReady ? "Connected" : "Offline"}</span></div>
