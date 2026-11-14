@@ -124,7 +124,7 @@ class CoachingExamActivity : Activity() {
             setPadding(dp(12), dp(12), dp(12), dp(12))
             setBackgroundColor(android.graphics.Color.rgb(21, 31, 48))
         }
-        content.addView(paperTextInput, fieldParams())
+        content.addView(paperTextInput, LinearLayout.LayoutParams(-1, dp(280)).apply { bottomMargin = dp(2) })
 
         val previewButton = makeButton("Preview parsed paper", false) {
             previewPaper()
