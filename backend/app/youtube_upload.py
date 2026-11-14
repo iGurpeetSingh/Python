@@ -182,7 +182,8 @@ async def _make_metadata(path: Path, command: str, transcript: str, visual_summa
     context = (
         f"Spoken upload instruction: {command}\n"
         f"Video filename: {path.name}\n"
-        f"Video transcript (may be empty): {transcript or '[not available]'}\n"\n        f"Visual frame analysis (may be empty): {visual_summary or '[not available]'}"
+        f"Video transcript (may be empty): {transcript or '[not available]'}\n"
+        f"Visual frame analysis (may be empty): {visual_summary or '[not available]'}"
     )
     prompt = (
         "Create accurate YouTube metadata for this video. Do not invent facts not supported by "
