@@ -282,11 +282,12 @@ class AgentAccessibilityService : AccessibilityService() {
             val bounds = android.graphics.Rect()
             node.getBoundsInScreen(bounds)
             val inTopSearchArea = rootBounds.height() > 0 &&
-                bounds.centerY() < rootBounds.top + rootBounds.height() * 0.38f
+                bounds.centerY() < rootBounds.top + rootBounds.height() * 0.45f
             val hasSearchIdentity =
                 id.contains("search") || hint.contains("search") || hint.contains("खोज") ||
                 text.contains("ask meta ai") || desc.contains("ask meta ai") ||
-                (cls.contains("autocompletetextview") && inTopSearchArea)
+                cls.contains("autocompletetextview") || cls.contains("searchview") ||
+                (node.isFocused && inTopSearchArea)
             node.isVisibleToUser && node.isEnabled && inTopSearchArea && hasSearchIdentity
         }
         editables.forEach { it.recycle() }
@@ -329,7 +330,15 @@ class AgentAccessibilityService : AccessibilityService() {
                 } + if (node.isClickable) 5 else 0
             }
         var clicked = false
+        var metaSearchBounds: android.graphics.Rect? = null
         for (candidate in ranked) {
+            val label = (
+                candidate.text?.toString().orEmpty() + " " +
+                candidate.contentDescription?.toString().orEmpty()
+            ).lowercase(Locale.ROOT)
+            if (label.contains("ask meta ai") || (label.contains("meta ai") && label.contains("search"))) {
+                metaSearchBounds = android.graphics.Rect().also { candidate.getBoundsInScreen(it) }
+            }
             if (clickNode(candidate)) {
                 clicked = true
                 break
@@ -339,7 +348,21 @@ class AgentAccessibilityService : AccessibilityService() {
         root.recycle()
         if (clicked) return true
 
-        // Search may be inside the top-right overflow menu on some WhatsApp layouts.
+        // Some WhatsApp builds expose the Meta AI/Search pill as a non-clickable
+        // accessibility child while its visual parent handles touch input. Tap
+        // the center of the exact labelled pill instead of opening the overflow menu.
+        val pill = metaSearchBounds
+        if (pill != null && pill.width() > 0 && pill.height() > 0) {
+            val x = pill.exactCenterX()
+            val y = pill.exactCenterY()
+            val path = Path().apply { moveTo(x, y) }
+            val gesture = GestureDescription.Builder()
+                .addStroke(GestureDescription.StrokeDescription(path, 0, 90))
+                .build()
+            if (dispatchGesture(gesture, null, handler)) return true
+        }
+
+        // Search may be inside the top-right overflow menu on older WhatsApp layouts.
         val freshRoot = rootInActiveWindow ?: return false
         if (freshRoot.packageName?.toString() != "com.whatsapp") {
             freshRoot.recycle()
@@ -428,13 +451,14 @@ class AgentAccessibilityService : AccessibilityService() {
             val bounds = android.graphics.Rect()
             node.getBoundsInScreen(bounds)
             val inTopSearchArea = rootBounds.height() > 0 &&
-                bounds.centerY() < rootBounds.top + rootBounds.height() * 0.38f
+                bounds.centerY() < rootBounds.top + rootBounds.height() * 0.45f
             val hasSearchIdentity =
                 hint.contains("search") || hint.contains("खोज") ||
                 text.contains("ask meta ai") || desc.contains("ask meta ai") ||
                 desc.contains("search") || desc.contains("खोज") ||
                 id.contains("search") ||
-                (className.contains("autocompletetextview") && inTopSearchArea)
+                className.contains("autocompletetextview") || className.contains("searchview") ||
+                (node.isFocused && inTopSearchArea)
             node.isVisibleToUser && node.isEnabled && inTopSearchArea && hasSearchIdentity
         }
         nodes.filter { it !== target }.forEach { it.recycle() }
@@ -442,12 +466,41 @@ class AgentAccessibilityService : AccessibilityService() {
         val args = android.os.Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value)
         }
-        // Some WhatsApp builds expose a clickable search field whose ACTION_FOCUS
-        // returns false even though ACTION_SET_TEXT is supported. Try both safely.
+        // Focus/click first, then refresh the accessibility tree: WhatsApp can
+        // replace the pill with a new EditText after expansion.
         target.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
         target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-        val changed = target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        var changed = target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
         target.recycle()
+        if (changed) return true
+
+        val refreshedRoot = rootInActiveWindow ?: return false
+        if (refreshedRoot.packageName?.toString() != "com.whatsapp") {
+            refreshedRoot.recycle()
+            return false
+        }
+        val refreshed = mutableListOf<AccessibilityNodeInfo>()
+        collectEditableNodes(refreshedRoot, refreshed, 0)
+        val refreshedBounds = android.graphics.Rect()
+        refreshedRoot.getBoundsInScreen(refreshedBounds)
+        refreshedRoot.recycle()
+        val retryTarget = refreshed.firstOrNull { node ->
+            val hint = node.hintText?.toString()?.lowercase(Locale.ROOT).orEmpty()
+            val id = node.viewIdResourceName?.lowercase(Locale.ROOT).orEmpty()
+            val cls = node.className?.toString()?.lowercase(Locale.ROOT).orEmpty()
+            val bounds = android.graphics.Rect()
+            node.getBoundsInScreen(bounds)
+            node.isVisibleToUser && node.isEnabled &&
+                refreshedBounds.height() > 0 &&
+                bounds.centerY() < refreshedBounds.top + refreshedBounds.height() * 0.45f &&
+                (id.contains("search") || hint.contains("search") || hint.contains("खोज") ||
+                 cls.contains("autocompletetextview") || cls.contains("searchview"))
+        }
+        refreshed.filter { it !== retryTarget }.forEach { it.recycle() }
+        if (retryTarget == null) return false
+        retryTarget.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+        changed = retryTarget.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        retryTarget.recycle()
         return changed
     }
 
