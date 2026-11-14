@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from fastapi import HTTPException
 
-from app.papers import _file_path, _require_admin, _student_safe, _validate_paper
+from app.papers import _attempt_result, _file_path, _parse_utc, _require_admin, _student_safe, _validate_paper
 
 
 def objective_payload(count: int = 50) -> dict:
@@ -104,6 +104,35 @@ class PaperValidationTests(unittest.TestCase):
         self.assertNotIn("answerGuide", safe["questions"][0])
         self.assertNotIn("answerGuide", safe["writtenQuestions"][0])
         self.assertEqual(source["questions"][0]["correctIndex"], 1)
+
+    def test_attempt_result_does_not_leak_receipt_or_saved_answers(self):
+        attempt = {
+            "id": "a" * 32,
+            "paperType": "objective",
+            "title": "Science Mock Exam",
+            "studentName": "Student",
+            "rollNumber": "R-001",
+            "startedAt": datetime.now(timezone.utc).isoformat(),
+            "submittedAt": datetime.now(timezone.utc).isoformat(),
+            "status": "evaluated",
+            "score": 80,
+            "totalMarks": 100,
+            "correctCount": 40,
+            "incorrectCount": 5,
+            "unansweredCount": 5,
+            "receiptHash": "private-hash",
+            "answers": {"0": 1},
+            "paperSnapshot": {"questions": [{"correctIndex": 1}]},
+        }
+        public = _attempt_result(attempt)
+        self.assertEqual(public["score"], 80)
+        self.assertNotIn("receiptHash", public)
+        self.assertNotIn("answers", public)
+        self.assertNotIn("paperSnapshot", public)
+
+    def test_schedule_parser_requires_timezone(self):
+        with self.assertRaises(HTTPException):
+            _parse_utc("2026-11-14T10:00:00")
 
     def test_path_only_accepts_known_exam_types(self):
         self.assertEqual(_file_path("objective"), "data/exams/objective.json")
