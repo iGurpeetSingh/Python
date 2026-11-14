@@ -2,6 +2,13 @@ package com.orbit.agent
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
+import android.content.ContentUris
+import android.net.Uri
+import android.provider.MediaStore
+import com.google.android.gms.auth.api.identity.AuthorizationRequest
+import com.google.android.gms.auth.api.identity.Identity
+import com.google.android.gms.common.api.Scope
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -30,6 +37,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var actionRunning = false
     private var pendingMessageReady = false
     private var pendingMessagePackage = ""
+    private var pendingYoutubeDurationMs: Long = -1L
+    private var selectedYoutubeUri: Uri? = null
+    private var selectedYoutubeName: String = ""
+    private var pendingYoutubeAction = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -98,6 +109,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         layout.addView(accessibilityButton)
         layout.addView(help)
         setContentView(layout)
+        if (intent?.action == ACTION_YOUTUBE_UPLOAD) {
+            pendingYoutubeAction = true
+            handler.postDelayed({ beginYoutubeUpload(intent) }, 350)
+        }
         updateAccessibilityButton()
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_AUDIO)
@@ -110,7 +125,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         super.onResume()
         isResumed = true
         updateAccessibilityButton()
-        if (listeningEnabled && hasAudioPermission()) startBackgroundVoiceService(GuriBackgroundVoiceService.ACTION_LISTEN)
+        if (listeningEnabled && hasAudioPermission() && !pendingYoutubeAction) startBackgroundVoiceService(GuriBackgroundVoiceService.ACTION_LISTEN)
     }
 
     override fun onPause() {
@@ -159,7 +174,206 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 startBackgroundVoiceService(GuriBackgroundVoiceService.ACTION_LISTEN)
                 status.text = "गुरी बैकग्राउंड में सुन रही है…"
             } else status.text = "Voice चलाने के लिए Microphone permission जरूरी है।"
+        } else if (requestCode == REQUEST_MEDIA_VIDEO) {
+            if (grantResults.any { it == PackageManager.PERMISSION_GRANTED }) {
+                findVideoForYoutubeUpload()
+            } else {
+                status.text = "वीडियो पढ़ने की अनुमति नहीं मिली। अब वीडियो चुनने के लिए picker खोल रही हूँ।"
+                openYoutubeVideoPicker()
+            }
         }
+    }
+
+    private fun beginYoutubeUpload(source: Intent?) {
+        pendingYoutubeDurationMs = source?.getLongExtra(EXTRA_DURATION_MS, -1L) ?: -1L
+        pendingYoutubeAction = true
+        stopListening()
+        startBackgroundVoiceService(GuriBackgroundVoiceService.ACTION_PAUSE)
+        status.text = "YouTube के लिए फोन में वीडियो खोज रही हूँ…"
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(
+                arrayOf(Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED),
+                REQUEST_MEDIA_VIDEO
+            )
+        } else if (android.os.Build.VERSION.SDK_INT < 33 &&
+            checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE), REQUEST_MEDIA_VIDEO)
+        } else {
+            findVideoForYoutubeUpload()
+        }
+    }
+
+    private fun findVideoForYoutubeUpload() {
+        if (pendingYoutubeDurationMs <= 0L) {
+            openYoutubeVideoPicker()
+            return
+        }
+        val projection = arrayOf(
+            MediaStore.Video.Media._ID,
+            MediaStore.Video.Media.DISPLAY_NAME,
+            MediaStore.Video.Media.DURATION,
+            MediaStore.Video.Media.SIZE
+        )
+        val tolerance = 2500L
+        val selection = "${MediaStore.Video.Media.DURATION} BETWEEN ? AND ?"
+        val args = arrayOf(
+            (pendingYoutubeDurationMs - tolerance).coerceAtLeast(0L).toString(),
+            (pendingYoutubeDurationMs + tolerance).toString()
+        )
+        val matches = mutableListOf<Pair<Uri, String>>()
+        try {
+            contentResolver.query(
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                projection, selection, args,
+                "${MediaStore.Video.Media.DATE_ADDED} DESC"
+            )?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
+                val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(idCol)
+                    val name = cursor.getString(nameCol) ?: "Video"
+                    matches += ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id) to name
+                }
+            }
+        } catch (error: SecurityException) {
+            status.text = "फोन की वीडियो सूची पढ़ने की अनुमति नहीं मिली।"
+            openYoutubeVideoPicker()
+            return
+        }
+        when (matches.size) {
+            0 -> {
+                status.text = "इस अवधि की वीडियो नहीं मिली। अब फोन से वीडियो चुनें।"
+                openYoutubeVideoPicker()
+            }
+            1 -> prepareYoutubeUpload(matches.first().first, matches.first().second)
+            else -> {
+                val labels = matches.map { it.second }.toTypedArray()
+                AlertDialog.Builder(this)
+                    .setTitle("एक से अधिक वीडियो मिलीं")
+                    .setItems(labels) { _, which -> prepareYoutubeUpload(matches[which].first, matches[which].second) }
+                    .setNegativeButton("रद्द करें") { _, _ -> cancelYoutubeUpload() }
+                    .show()
+            }
+        }
+    }
+
+    private fun openYoutubeVideoPicker() {
+        val pick = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "video/*"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }
+        startActivityForResult(pick, REQUEST_VIDEO_PICKER)
+    }
+
+    private fun prepareYoutubeUpload(uri: Uri, name: String) {
+        selectedYoutubeUri = uri
+        selectedYoutubeName = name
+        status.text = "वीडियो मिली: $name. YouTube अनुमति जाँच रही हूँ…"
+        val request = AuthorizationRequest.Builder()
+            .setRequestedScopes(listOf(Scope(YOUTUBE_UPLOAD_SCOPE)))
+            .build()
+        Identity.getAuthorizationClient(this).authorize(request)
+            .addOnSuccessListener { result ->
+                if (result.hasResolution() && result.pendingIntent != null) {
+                    try {
+                        startIntentSenderForResult(
+                            result.pendingIntent!!.intentSender,
+                            REQUEST_YOUTUBE_AUTH, null, 0, 0, 0
+                        )
+                    } catch (error: Exception) {
+                        showYoutubeError("Google अनुमति स्क्रीन नहीं खुली: ${error.message}")
+                    }
+                } else {
+                    val token = result.accessToken
+                    if (token.isNullOrBlank()) showYoutubeError("Google से YouTube access token नहीं मिला।")
+                    else uploadSelectedYoutubeVideo(token)
+                }
+            }
+            .addOnFailureListener { error ->
+                showYoutubeError("YouTube अकाउंट authorization विफल: ${error.message}")
+            }
+    }
+
+    @Deprecated("Activity result API retained for compatibility with the existing Activity-based app")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        when (requestCode) {
+            REQUEST_VIDEO_PICKER -> {
+                if (resultCode == RESULT_OK && data?.data != null) {
+                    val uri = data.data!!
+                    try {
+                        contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    } catch (_: Exception) {}
+                    try {
+                        val name = YouTubeUploadManager.inspect(contentResolver, uri).name
+                        prepareYoutubeUpload(uri, name)
+                    } catch (error: Exception) {
+                        showYoutubeError(error.message ?: "चुनी हुई वीडियो पढ़ी नहीं जा सकी।")
+                    }
+                } else {
+                    showYoutubeError("वीडियो चयन रद्द कर दिया गया।")
+                }
+            }
+            REQUEST_YOUTUBE_AUTH -> {
+                if (resultCode == RESULT_OK && data != null) {
+                    try {
+                        val result = Identity.getAuthorizationClient(this).getAuthorizationResultFromIntent(data)
+                        val token = result.accessToken
+                        if (token.isNullOrBlank()) showYoutubeError("Google ने access token नहीं दिया।")
+                        else uploadSelectedYoutubeVideo(token)
+                    } catch (error: Exception) {
+                        showYoutubeError("YouTube authorization पूरी नहीं हुई: ${error.message}")
+                    }
+                } else {
+                    showYoutubeError("YouTube upload permission नहीं दी गई।")
+                }
+            }
+        }
+    }
+
+    private fun uploadSelectedYoutubeVideo(accessToken: String) {
+        val uri = selectedYoutubeUri ?: run {
+            showYoutubeError("अपलोड करने के लिए वीडियो चुनी नहीं गई।")
+            return
+        }
+        status.text = "YouTube पर अपलोड शुरू हो रहा है: $selectedYoutubeName"
+        val title = selectedYoutubeName.substringBeforeLast('.').take(100)
+        YouTubeUploadManager.upload(
+            this, uri, accessToken, title,
+            "Uploaded with Guri AI Agent.", "unlisted",
+            onProgress = { sent, total ->
+                runOnUiThread {
+                    status.text = "YouTube upload: ${(sent * 100 / total).coerceIn(0, 100)}%"
+                }
+            },
+            onSuccess = { result ->
+                runOnUiThread {
+                    val message = "YouTube पर अपलोड सफल। लिंक: https://youtu.be/${result.videoId}"
+                    status.text = message
+                    tts?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "youtube-upload-success")
+                    selectedYoutubeUri = null
+                    pendingYoutubeAction = false
+                    if (listeningEnabled) startBackgroundVoiceService(GuriBackgroundVoiceService.ACTION_LISTEN)
+                }
+            },
+            onError = { error -> runOnUiThread { showYoutubeError(error) } }
+        )
+    }
+
+    private fun showYoutubeError(message: String) {
+        status.text = message
+        tts?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "youtube-upload-error")
+        pendingYoutubeAction = false
+        if (listeningEnabled && isResumed) startBackgroundVoiceService(GuriBackgroundVoiceService.ACTION_LISTEN)
+    }
+
+    private fun cancelYoutubeUpload() {
+        selectedYoutubeUri = null
+        pendingYoutubeAction = false
+        status.text = "YouTube upload रद्द कर दिया गया।"
+        if (listeningEnabled && isResumed) startBackgroundVoiceService(GuriBackgroundVoiceService.ACTION_LISTEN)
     }
 
     private fun ensureRecognizer(): Boolean {
@@ -595,7 +809,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     companion object {
+        const val ACTION_YOUTUBE_UPLOAD = "com.orbit.agent.action.YOUTUBE_UPLOAD"
+        const val EXTRA_DURATION_MS = "youtube_duration_ms"
+        private const val YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
         private const val REQUEST_AUDIO = 42
         private const val REQUEST_NOTIFICATIONS = 43
+        private const val REQUEST_MEDIA_VIDEO = 44
+        private const val REQUEST_VIDEO_PICKER = 45
+        private const val REQUEST_YOUTUBE_AUTH = 46
     }
 }

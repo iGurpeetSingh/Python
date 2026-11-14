@@ -225,6 +225,26 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
 
         updateListeningNotification("कमांड पहचानी: " + normalized.take(70))
 
+        val asksYouTube = listOf("youtube", "you tube", "यूट्यूब").any { normalized.contains(it) }
+        val asksUpload = listOf("अपलोड", "upload", "डाल दो", "डाल देना", "डालना", "चढ़ा दो", "चढ़ा देना", "पोस्ट कर").any { normalized.contains(it) }
+        if (asksYouTube && asksUpload) {
+            val durationMs = parseYoutubeDurationMillis(normalized)
+            actionInProgress = true
+            resetRecognizer()
+            updateListeningNotification("YouTube वीडियो खोजने की तैयारी कर रही हूँ")
+            val uploadIntent = Intent(this, MainActivity::class.java).apply {
+                action = MainActivity.ACTION_YOUTUBE_UPLOAD
+                putExtra(MainActivity.EXTRA_DURATION_MS, durationMs)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            }
+            try {
+                startActivity(uploadIntent)
+            } catch (error: Exception) {
+                speak("YouTube upload स्क्रीन नहीं खुली। Guri ऐप खोलकर कमांड दोबारा दें।")
+            }
+            return
+        }
+
         // Handle screen locking before app-launch and scroll commands.
         // Explicit unlock phrases are excluded so "लॉक खोलो" is never treated as a lock request.
         val asksUnlock = listOf(
@@ -318,6 +338,26 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
         }
 
         handler.postDelayed({ startRecognition() }, 350)
+    }
+
+    private fun parseYoutubeDurationMillis(command: String): Long {
+        val numberWords = linkedMapOf(
+            "ग्यारह" to "11", "बारह" to "12", "तेरह" to "13", "चौदह" to "14",
+            "पंद्रह" to "15", "सोलह" to "16", "सत्रह" to "17", "अठारह" to "18", "उन्नीस" to "19",
+            "बीस" to "20", "इक्कीस" to "21", "बाईस" to "22", "तेईस" to "23", "चौबीस" to "24",
+            "पच्चीस" to "25", "छब्बीस" to "26", "सत्ताईस" to "27", "अट्ठाईस" to "28", "उनतीस" to "29",
+            "तीस" to "30", "एक" to "1", "दो" to "2", "तीन" to "3", "चार" to "4",
+            "पांच" to "5", "पाँच" to "5", "छह" to "6", "छः" to "6", "सात" to "7",
+            "आठ" to "8", "नौ" to "9", "दस" to "10"
+        )
+        var numeric = command
+        numberWords.forEach { (word, digit) -> numeric = numeric.replace(word, digit) }
+        val match = Regex("(\\d+)\\s*(?:मिनट|मिनिट|min|minutes?)\\s*(?:(\\d+)\\s*(?:सेकंड|सेकेंड|seconds?|sec))?", RegexOption.IGNORE_CASE)
+            .find(numeric) ?: return -1L
+        val minutes = match.groupValues[1].toLongOrNull() ?: return -1L
+        val seconds = match.groupValues.getOrNull(2)?.toLongOrNull() ?: 0L
+        if (seconds >= 60L || minutes > 600L) return -1L
+        return (minutes * 60L + seconds) * 1000L
     }
 
     private fun resolveInstalledApp(command: String): Pair<String, String>? {
