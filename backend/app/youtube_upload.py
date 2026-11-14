@@ -278,7 +278,10 @@ def _upload(path: Path, metadata: dict[str, Any]) -> dict[str, str]:
 async def upload_from_voice_command(command: str) -> dict[str, Any]:
     path = find_video(command)
     transcript = await asyncio.to_thread(_transcribe, path)
-    metadata = await _make_metadata(path, command, transcript)
+    visual_summary = await _describe_video_frames(path)
+    if not visual_summary:
+        raise HTTPException(503, "Video का visual analysis नहीं हो पाया। Ollama में llava:7b install/run करें और FFmpeg जाँचें; upload रोक दिया गया।")
+    metadata = await _make_metadata(path, command, transcript, visual_summary)
     uploaded = await asyncio.to_thread(_upload, path, metadata)
     return {
         "reply": (
@@ -291,5 +294,6 @@ async def upload_from_voice_command(command: str) -> dict[str, Any]:
         "duration_seconds": _duration_seconds(path),
         "metadata": metadata,
         **uploaded,
-        "transcript_used": bool(transcript),\n        "visual_analysis_used": bool(visual_summary),
+        "transcript_used": bool(transcript),
+        "visual_analysis_used": True,
     }
