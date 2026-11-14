@@ -81,6 +81,9 @@ class CoachingExamActivity : Activity() {
         content.addView(subtitle)
 
         apiUrlInput = addInput(content, "Render API URL", prefs.getString("api_url", "") ?: "", "https://your-service.onrender.com")
+        content.addView(makeButton("Check Live API & Published Papers", false) {
+            checkApiConnection()
+        }, buttonParams())
         adminTokenInput = addInput(
             content, "Admin token (PAPER_ADMIN_TOKEN)",
             "", "Paste the private admin token",
@@ -198,6 +201,64 @@ class CoachingExamActivity : Activity() {
     }
 
 
+    private fun checkApiConnection() {
+        val baseUrl = apiUrlInput.text.toString().trim().trimEnd('/')
+        if (!baseUrl.startsWith("https://")) {
+            statusText.text = "Enter the HTTPS Render API URL first."
+            return
+        }
+
+        getSharedPreferences("coaching_exam_control", MODE_PRIVATE)
+            .edit().putString("api_url", baseUrl).apply()
+        statusText.text = "Checking API health and GitHub paper storage…"
+
+        Thread {
+            try {
+                val healthRequest = Request.Builder()
+                    .url("$baseUrl/api/health")
+                    .header("Accept", "application/json")
+                    .get()
+                    .build()
+                val health = client.newCall(healthRequest).execute().use { response ->
+                    val raw = response.body?.string().orEmpty()
+                    if (!response.isSuccessful) {
+                        throw IllegalStateException("Health check failed (HTTP ${response.code}).")
+                    }
+                    JSONObject(raw)
+                }
+
+                val papersRequest = Request.Builder()
+                    .url("$baseUrl/api/exams/published")
+                    .header("Accept", "application/json")
+                    .get()
+                    .build()
+                val publishedCount = client.newCall(papersRequest).execute().use { response ->
+                    val raw = response.body?.string().orEmpty()
+                    if (!response.isSuccessful) {
+                        val detail = runCatching { JSONObject(raw).optString("detail") }.getOrNull()
+                        throw IllegalStateException(
+                            detail?.takeIf { it.isNotBlank() }
+                                ?: "Paper storage check failed (HTTP ${response.code})."
+                        )
+                    }
+                    JSONObject(raw).optJSONArray("items")?.length() ?: 0
+                }
+
+                val configured = health.optBoolean("paper_api_configured", false)
+                runOnUiThread {
+                    statusText.text = if (configured) {
+                        "LIVE ✓ API and GitHub paper storage connected. $publishedCount paper(s) currently published."
+                    } else {
+                        "API is reachable, but PAPER_GITHUB_TOKEN or PAPER_ADMIN_TOKEN is missing in Render."
+                    }
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    statusText.text = "API check failed: ${error.localizedMessage ?: "unknown error"}"
+                }
+            }
+        }.start()
+    }
     private fun addResultText(parent: LinearLayout, value: String, size: Float = 12f, bold: Boolean = false) {
         val text = TextView(this).apply {
             text = value
