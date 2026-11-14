@@ -366,6 +366,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         status.text = message
         tts?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "youtube-upload-error")
         pendingYoutubeAction = false
+        if (listeningEnabled && isResumed) startBackgroundVoiceService(GuriBackgroundVoiceService.ACTION_LISTEN)
+    }
+
+    private fun cancelYoutubeUpload() {
+        selectedYoutubeUri = null
+        pendingYoutubeAction = false
+        status.text = "YouTube upload रद्द कर दिया गया।"
+        if (listeningEnabled && isResumed) startBackgroundVoiceService(GuriBackgroundVoiceService.ACTION_LISTEN)
     }
 
     private fun ensureRecognizer(): Boolean {
