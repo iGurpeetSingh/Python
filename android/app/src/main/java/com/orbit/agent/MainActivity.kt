@@ -789,7 +789,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             val workId = YouTubeUploadCoordinator.enqueue(this, uri, pendingYoutubeMime, metadata, accessToken)
             status.text = "YouTube upload queue में जोड़ दिया है…"
             val uploadStatus = WorkManager.getInstance(this).getWorkInfoByIdLiveData(workId)
-            val statusObserver = object : androidx.lifecycle.Observer<WorkInfo> {
+            val statusObserver = object : androidx.lifecycle.Observer<WorkInfo?> {
                 override fun onChanged(info: WorkInfo?) {
                     if (info == null) return
                     when (info.state) {
