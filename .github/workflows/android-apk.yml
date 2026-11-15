@@ -28,8 +28,11 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Print debug signing fingerprint
-        run: gradle -p android :app:signingReport --no-daemon
+      - name: Prepare debug signing key and print SHA-1
+        run: |
+          mkdir -p "$HOME/.config/.android"
+          keytool -genkeypair -noprompt -v -keystore "$HOME/.config/.android/debug.keystore" -storepass android -alias AndroidDebugKey -keypass android -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 10000
+          gradle -p android :app:signingReport --no-daemon
 
       - name: Build debug APK
         run: gradle -p android :app:testDebugUnitTest :app:assembleDebug --no-daemon
