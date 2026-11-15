@@ -123,7 +123,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         layout.addView(hint)
         layout.addView(micButton)
         layout.addView(accessibilityButton)
-        layout.addView(examControlButton)\n        layout.addView(youtubeUploadButton)
+        layout.addView(examControlButton)
         layout.addView(youtubeUploadButton)
         layout.addView(help)
         setContentView(layout)
