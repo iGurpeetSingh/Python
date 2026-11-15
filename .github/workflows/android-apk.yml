@@ -29,7 +29,7 @@ jobs:
           gradle-version: "8.9"
 
       - name: Build debug APK
-        run: gradle -p android :app:assembleDebug --no-daemon
+        run: gradle -p android :app:testDebugUnitTest :app:assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
