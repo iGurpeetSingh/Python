@@ -1,7 +1,7 @@
 package com.orbit.agent
 
 import android.Manifest
-import android.app.Activity
+import androidx.activity.ComponentActivity
 import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -30,7 +30,7 @@ import com.orbit.agent.youtube.VideoMetadata
 import com.orbit.agent.youtube.YouTubeAuthorizationManager
 import com.orbit.agent.youtube.YouTubeUploadCoordinator
 
-class MainActivity : Activity(), TextToSpeech.OnInitListener {
+class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private val handler = Handler(Looper.getMainLooper())
     private var recognizer: SpeechRecognizer? = null
     private var tts: TextToSpeech? = null
