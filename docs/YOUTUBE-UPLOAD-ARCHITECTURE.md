@@ -147,3 +147,15 @@ The first native Android implementation has now been added on branch `feature/yo
 - Upload is chunked and uses YouTube's resumable protocol, but the session URI/byte offset is not yet durably checkpointed across Android process death. A process kill may require starting a new upload.
 - Long uploads may need renewed authorization if the short-lived access token expires.
 - CI can compile and run JVM unit tests, but it cannot validate Google consent, YouTube account/channel eligibility, real video-library access, or Motorola OEM background behavior.
+
+
+## Latest CI result
+
+- Latest verified Android build commit: `cc5fe01fa4090c8d869501d193043520ffb5fff9`.
+- GitHub Actions run: https://github.com/iGurpeetSingh/Python/actions/runs/43693399426
+- Result: `success`.
+- `:app:testDebugUnitTest`: passed.
+- `:app:assembleDebug`: passed.
+- APK artifact: `Guri-Android-debug` (4,760,289-byte ZIP containing `app-debug.apk`).
+- The artifact was downloaded and the APK file was verified as an Android package.
+- This CI success does not replace OAuth consent or the required Motorola end-to-end acceptance test.
