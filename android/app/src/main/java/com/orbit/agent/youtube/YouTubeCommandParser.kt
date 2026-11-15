@@ -33,6 +33,14 @@ object YouTubeCommandParser {
             if (secs < 60) return ParsedCommand(mins * 60 + secs)
         }
 
+        val hindiMinutes = Regex("""([^\\s]+)\\s*मिनट""").find(normalized)
+        if (hindiMinutes != null) {
+            val minutes = numberWords[hindiMinutes.groupValues[1]]?.toLong()
+            val hindiSeconds = Regex("""([^\\s]+)\\s*सेकंड""").find(normalized)
+            val seconds = hindiSeconds?.groupValues?.get(1)?.let { numberWords[it]?.toLong() } ?: 0L
+            if (minutes != null && seconds < 60L) return ParsedCommand(minutes * 60L + seconds)
+        }
+
         val hindi = Regex("""([\p{L}]+)\s*(?:मिनट|minute|min)\s*(?:([\p{L}]+)\s*(?:सेकंड|second|sec))?""")
             .find(normalized)
         if (hindi != null) {
