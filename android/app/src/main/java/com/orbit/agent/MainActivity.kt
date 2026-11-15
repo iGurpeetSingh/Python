@@ -1,7 +1,7 @@
 package com.orbit.agent
 
 import android.Manifest
-import androidx.activity.ComponentActivity
+import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -30,7 +30,7 @@ import com.orbit.agent.youtube.VideoMetadata
 import com.orbit.agent.youtube.YouTubeAuthorizationManager
 import com.orbit.agent.youtube.YouTubeUploadCoordinator
 
-class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
+class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private val handler = Handler(Looper.getMainLooper())
     private var recognizer: SpeechRecognizer? = null
     private var tts: TextToSpeech? = null
@@ -788,25 +788,30 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         try {
             val workId = YouTubeUploadCoordinator.enqueue(this, uri, pendingYoutubeMime, metadata, accessToken)
             status.text = "YouTube upload queue में जोड़ दिया है…"
-            WorkManager.getInstance(this).getWorkInfoByIdLiveData(workId).observe(this) { info ->
-                if (info == null) return@observe
-                when (info.state) {
-                    WorkInfo.State.SUCCEEDED -> {
-                        val url = info.outputData.getString("watch_url").orEmpty()
-                        status.text = "YouTube upload पूरा हुआ: $url"
-                        Toast.makeText(this, "Upload complete: $url", Toast.LENGTH_LONG).show()
-                        pendingYoutubeUri = null
-                        pendingYoutubeMetadata = null
+            val uploadStatus = WorkManager.getInstance(this).getWorkInfoByIdLiveData(workId)
+            val statusObserver = object : androidx.lifecycle.Observer<WorkInfo> {
+                override fun onChanged(info: WorkInfo?) {
+                    if (info == null) return
+                    when (info.state) {
+                        WorkInfo.State.SUCCEEDED -> {
+                            val url = info.outputData.getString("watch_url").orEmpty()
+                            status.text = "YouTube upload पूरा हुआ: $url"
+                            Toast.makeText(this@MainActivity, "Upload complete: $url", Toast.LENGTH_LONG).show()
+                            pendingYoutubeUri = null
+                            pendingYoutubeMetadata = null
+                        }
+                        WorkInfo.State.FAILED -> {
+                            val error = info.outputData.getString("error") ?: "Upload असफल हुआ।"
+                            status.text = error
+                            Toast.makeText(this@MainActivity, error, Toast.LENGTH_LONG).show()
+                        }
+                        WorkInfo.State.RUNNING -> status.text = "YouTube पर वीडियो अपलोड हो रहा है…"
+                        else -> Unit
                     }
-                    WorkInfo.State.FAILED -> {
-                        val error = info.outputData.getString("error") ?: "Upload असफल हुआ।"
-                        status.text = error
-                        Toast.makeText(this, error, Toast.LENGTH_LONG).show()
-                    }
-                    WorkInfo.State.RUNNING -> status.text = "YouTube पर वीडियो अपलोड हो रहा है…"
-                    else -> Unit
+                    if (info.state.isFinished) uploadStatus.removeObserver(this)
                 }
             }
+            uploadStatus.observeForever(statusObserver)
         } catch (error: Exception) {
             Toast.makeText(this, "Upload queue नहीं बन पाई: ${error.localizedMessage}", Toast.LENGTH_LONG).show()
         }
