@@ -1,5 +1,7 @@
 package com.orbit.agent
 
+import com.orbit.agent.youtube.YouTubeCommandParser
+
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -257,6 +259,28 @@ class GuriBackgroundVoiceService : Service(), TextToSpeech.OnInitListener {
         }
 
         val asksInstagram = listOf("instagram", "insta", "इंस्टाग्राम", "इंस्टा ग्राम", "इंस्टा").any { normalized.contains(it) }
+
+        val youtubeUpload = YouTubeCommandParser.parse(normalized)
+        if (youtubeUpload != null) {
+            actionInProgress = true
+            try { recognizer?.cancel() } catch (_: Exception) {}
+            try {
+                val uploadIntent = Intent(this, MainActivity::class.java).apply {
+                    action = MainActivity.ACTION_YOUTUBE_UPLOAD
+                    putExtra(MainActivity.EXTRA_YOUTUBE_DURATION_SECONDS, youtubeUpload.durationSeconds ?: -1L)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                }
+                startActivity(uploadIntent)
+                speak(if (youtubeUpload.durationSeconds != null) {
+                    "${youtubeUpload.durationSeconds} सेकंड की वीडियो खोजने के लिए Upload स्क्रीन खोल रही हूँ।"
+                } else {
+                    "YouTube Upload स्क्रीन खोल रही हूँ। वीडियो चुनें या Duration बताएं।"
+                })
+            } catch (error: Exception) {
+                speak("YouTube Upload स्क्रीन नहीं खुली: ${error.localizedMessage ?: "unknown error"}")
+            }
+            return
+        }
 
         if (isWhatsAppCommand) {
             handleWhatsAppCommand(normalized, alternatives.map { it.lowercase(Locale.ROOT) })
