@@ -832,7 +832,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         const val ACTION_YOUTUBE_UPLOAD = "com.orbit.agent.ACTION_YOUTUBE_UPLOAD"
         const val EXTRA_YOUTUBE_DURATION_SECONDS = "youtube_duration_seconds"
         private const val REQUEST_VIDEO_PERMISSION = 9303
-        private const val REQUEST_YOUTUBE_VIDEO = 9300\n        private const val REQUEST_AUDIO = 42
+        private const val REQUEST_YOUTUBE_VIDEO = 9300
+        private const val REQUEST_AUDIO = 42
         private const val REQUEST_NOTIFICATIONS = 43
     }
 }
