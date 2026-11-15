@@ -159,3 +159,13 @@ The first native Android implementation has now been added on branch `feature/yo
 - APK artifact: `Guri-Android-debug` (4,760,289-byte ZIP containing `app-debug.apk`).
 - The artifact was downloaded and the APK file was verified as an Android package.
 - This CI success does not replace OAuth consent or the required Motorola end-to-end acceptance test.
+
+
+## Final CI debug build with OAuth fingerprint
+
+- Workflow run: https://github.com/iGurpeetSingh/Python/actions/runs/43693850049
+- Result: success.
+- Unit tests and debug APK assembly both passed.
+- The workflow now creates the debug keystore before printing the signing report, so the reported fingerprint matches the APK produced in that same run.
+- SHA-1 for this exact APK: `4F:E3:2A:EF:78:8A:97:E7:D8:4F:4A:A5:27:40:22:16:5E:EF:7C:03`.
+- Artifact ID: `14154190677`.
