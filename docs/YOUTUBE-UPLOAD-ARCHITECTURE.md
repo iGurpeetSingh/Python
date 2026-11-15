@@ -115,3 +115,35 @@ True semantic video understanding (visual scenes, objects, context) is a separat
 - Android YouTube API quickstart: https://developers.google.com/youtube/data/quickstart/android
 - Android media permissions: https://developer.android.com/reference/android/Manifest.permission
 - Google Android authorization API: https://developers.google.com/android/reference/com/google/android/gms/auth/api/identity/AuthorizationClient
+
+
+## Implementation status — 2026-11-15
+
+The first native Android implementation has now been added on branch `feature/youtube-upload-foundation`:
+
+- Hindi/Hinglish duration parser supports `09:03`, `9 minute 3 second`, and Hindi number words.
+- Local MediaStore duration search returns candidate videos and asks the user to choose if there are multiple matches.
+- A system document picker is available as a fallback.
+- A deterministic, editable title/description/tag draft is generated before upload.
+- Google Android AuthorizationClient requests only the YouTube upload scope.
+- Access tokens are stored using AndroidX EncryptedSharedPreferences before the background worker uses them.
+- WorkManager runs the upload with a foreground notification.
+- The upload client starts a YouTube resumable session and sends media in 8 MiB chunks, explicitly setting privacy to Unlisted.
+- Voice commands containing YouTube + upload are routed to the upload screen.
+- Unit tests cover duration parsing and metadata validation.
+- The APK workflow now runs unit tests before assembling the debug APK.
+
+### Remaining validation gates
+
+1. CI must pass on the latest branch commit; earlier intermediate commits failed while source wiring was being corrected.
+2. The owner must create an Android OAuth client in Google Cloud for package `com.orbit.agent` and the SHA-1 of the signing certificate used by the installed APK, and enable YouTube Data API v3.
+3. The owner must complete Google account consent on the phone.
+4. Install the resulting APK on the target Motorola device and test media permission, 9:03 duration search, metadata editing, OAuth consent, upload, network interruption, and the final YouTube watch URL.
+5. Only after these gates pass should the draft PR be merged and the APK called release-ready.
+
+### Known limitations before device validation
+
+- The current MVP uses filename and user-provided context for SEO drafts; it does not perform visual scene understanding or automatic speech transcription.
+- Upload is chunked and uses YouTube's resumable protocol, but the session URI/byte offset is not yet durably checkpointed across Android process death. A process kill may require starting a new upload.
+- Long uploads may need renewed authorization if the short-lived access token expires.
+- CI can compile and run JVM unit tests, but it cannot validate Google consent, YouTube account/channel eligibility, real video-library access, or Motorola OEM background behavior.
