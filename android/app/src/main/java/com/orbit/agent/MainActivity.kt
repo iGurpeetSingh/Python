@@ -123,11 +123,39 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         layout.addView(examControlButton)\n        layout.addView(youtubeUploadButton)
         layout.addView(help)
         setContentView(layout)
+        handleYoutubeUploadIntent(intent)
         updateAccessibilityButton()
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_AUDIO)
         } else {
             requestNotificationPermissionIfNeeded()
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleYoutubeUploadIntent(intent)
+    }
+
+    private fun handleYoutubeUploadIntent(source: Intent?) {
+        if (source?.action != ACTION_YOUTUBE_UPLOAD) return
+        source.action = null
+        val duration = source.getLongExtra(EXTRA_YOUTUBE_DURATION_SECONDS, -1L)
+        if (duration > 0L) {
+            pendingVideoDurationSeconds = duration
+            val permission = if (android.os.Build.VERSION.SDK_INT >= 33) {
+                Manifest.permission.READ_MEDIA_VIDEO
+            } else {
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            }
+            if (checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) {
+                searchVideosByPendingDuration()
+            } else {
+                requestPermissions(arrayOf(permission), REQUEST_VIDEO_PERMISSION)
+            }
+        } else {
+            promptVideoDurationSearch()
         }
     }
 
@@ -801,6 +829,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     companion object {
+        const val ACTION_YOUTUBE_UPLOAD = "com.orbit.agent.ACTION_YOUTUBE_UPLOAD"
+        const val EXTRA_YOUTUBE_DURATION_SECONDS = "youtube_duration_seconds"
         private const val REQUEST_VIDEO_PERMISSION = 9303
         private const val REQUEST_YOUTUBE_VIDEO = 9300\n        private const val REQUEST_AUDIO = 42
         private const val REQUEST_NOTIFICATIONS = 43
