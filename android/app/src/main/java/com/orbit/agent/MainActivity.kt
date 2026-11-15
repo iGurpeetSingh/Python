@@ -2,6 +2,7 @@ package com.orbit.agent
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -14,9 +15,20 @@ import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.view.Gravity
 import android.widget.Button
+import android.widget.EditText
+import android.widget.Toast
 import android.widget.LinearLayout
 import android.widget.TextView
 import java.util.Locale
+import android.net.Uri
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
+import com.orbit.agent.youtube.LocalVideoRepository
+import com.orbit.agent.youtube.YouTubeCommandParser
+import com.orbit.agent.youtube.SeoMetadataBuilder
+import com.orbit.agent.youtube.VideoMetadata
+import com.orbit.agent.youtube.YouTubeAuthorizationManager
+import com.orbit.agent.youtube.YouTubeUploadCoordinator
 
 class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private val handler = Handler(Looper.getMainLooper())
@@ -30,6 +42,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var actionRunning = false
     private var pendingMessageReady = false
     private var pendingMessagePackage = ""
+    private var pendingYoutubeUri: Uri? = null
+    private var pendingYoutubeMime: String = "video/mp4"
+    private var pendingYoutubeMetadata: VideoMetadata? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -85,6 +100,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
         }
 
+        val findByDurationButton = Button(this).apply {
+            text = "Duration से वीडियो खोजें"
+            setOnClickListener { promptVideoDurationSearch() }
+        }
+        val youtubeUploadButton = Button(this).apply {
+            text = "YouTube Upload"
+            setOnClickListener { openYoutubeVideoPicker() }
+        }
         val examControlButton = Button(this).apply {
             text = "Coaching & Exam Control"
             setOnClickListener { startActivity(Intent(this@MainActivity, CoachingExamActivity::class.java)) }
@@ -102,13 +125,43 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         layout.addView(micButton)
         layout.addView(accessibilityButton)
         layout.addView(examControlButton)
+        layout.addView(findByDurationButton)
+        layout.addView(youtubeUploadButton)
         layout.addView(help)
         setContentView(layout)
+        handleYoutubeUploadIntent(intent)
         updateAccessibilityButton()
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_AUDIO)
         } else {
             requestNotificationPermissionIfNeeded()
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleYoutubeUploadIntent(intent)
+    }
+
+    private fun handleYoutubeUploadIntent(source: Intent?) {
+        if (source?.action != ACTION_YOUTUBE_UPLOAD) return
+        source.action = null
+        val duration = source.getLongExtra(EXTRA_YOUTUBE_DURATION_SECONDS, -1L)
+        if (duration > 0L) {
+            pendingVideoDurationSeconds = duration
+            val permission = if (android.os.Build.VERSION.SDK_INT >= 33) {
+                Manifest.permission.READ_MEDIA_VIDEO
+            } else {
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            }
+            if (checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) {
+                searchVideosByPendingDuration()
+            } else {
+                requestPermissions(arrayOf(permission), REQUEST_VIDEO_PERMISSION)
+            }
+        } else {
+            promptVideoDurationSearch()
         }
     }
 
@@ -158,6 +211,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_VIDEO_PERMISSION) {
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) searchVideosByPendingDuration()
+            else Toast.makeText(this, "वीडियो लाइब्रेरी permission नहीं मिली। आप YouTube Upload से वीडियो चुन सकते हैं।", Toast.LENGTH_LONG).show()
+            return
+        }
         if (requestCode == REQUEST_AUDIO) {
             if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
                 listeningEnabled = true
@@ -592,6 +650,187 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     override fun onInit(statusCode: Int) { if (statusCode == TextToSpeech.SUCCESS) tts?.language = Locale("hi", "IN") }
 
+    private var pendingVideoDurationSeconds: Long? = null
+
+    private fun promptVideoDurationSearch() {
+        val input = EditText(this).apply {
+            hint = "उदाहरण: 9:03 या 9 minute 3 second"
+            setSingleLine(true)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("वीडियो की Duration")
+            .setMessage("किस Duration वाली वीडियो खोजनी है?")
+            .setView(input)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Search") { _, _ ->
+                val parsed = YouTubeCommandParser.parse("YouTube upload " + input.text.toString())
+                val seconds = parsed?.durationSeconds
+                if (seconds == null || seconds <= 0L) {
+                    Toast.makeText(this, "Duration समझ नहीं आई। 9:03 जैसे format में लिखें।", Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
+                pendingVideoDurationSeconds = seconds
+                val permission = if (android.os.Build.VERSION.SDK_INT >= 33) {
+                    Manifest.permission.READ_MEDIA_VIDEO
+                } else {
+                    Manifest.permission.READ_EXTERNAL_STORAGE
+                }
+                if (checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) {
+                    searchVideosByPendingDuration()
+                } else {
+                    requestPermissions(arrayOf(permission), REQUEST_VIDEO_PERMISSION)
+                }
+            }
+            .show()
+    }
+
+    private fun searchVideosByPendingDuration() {
+        val duration = pendingVideoDurationSeconds ?: return
+        try {
+            val matches = LocalVideoRepository(this).findByDuration(duration, 2L)
+            when (matches.size) {
+                0 -> Toast.makeText(this, "लगभग $duration सेकंड की कोई वीडियो नहीं मिली।", Toast.LENGTH_LONG).show()
+                1 -> reviewYoutubeVideo(matches.first().uri)
+                else -> {
+                    val labels = matches.map { candidate ->
+                        "${candidate.displayName} — ${candidate.durationSeconds}s"
+                    }.toTypedArray()
+                    AlertDialog.Builder(this)
+                        .setTitle("Matching videos चुनें")
+                        .setItems(labels) { _, index -> reviewYoutubeVideo(matches[index].uri) }
+                        .setNegativeButton("Cancel", null)
+                        .show()
+                }
+            }
+        } catch (error: Exception) {
+            Toast.makeText(this, "Video search failed: ${error.localizedMessage}", Toast.LENGTH_LONG).show()
+        } finally {
+            pendingVideoDurationSeconds = null
+        }
+    }
+
+    private fun openYoutubeVideoPicker() {
+        val picker = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "video/*"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }
+        startActivityForResult(picker, REQUEST_YOUTUBE_VIDEO)
+    }
+
+    private fun reviewYoutubeVideo(uri: Uri) {
+        try {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: Exception) { /* Some providers issue transient read grants only. */ }
+        try {
+            val candidate = LocalVideoRepository(this).describe(uri)
+            pendingYoutubeUri = uri
+            pendingYoutubeMime = candidate.mimeType
+            val draft = SeoMetadataBuilder.draft(candidate.displayName)
+            val titleInput = EditText(this).apply {
+                setText(draft.title)
+                hint = "YouTube title"
+            }
+            val descriptionInput = EditText(this).apply {
+                setText(draft.description)
+                hint = "Description"
+                minLines = 4
+                gravity = android.view.Gravity.TOP
+            }
+            val panel = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(36, 12, 36, 0)
+                addView(TextView(this@MainActivity).apply {
+                    text = "Video: ${candidate.displayName}\nDuration: ${candidate.durationSeconds} sec\nPrivacy: UNLISTED"
+                })
+                addView(titleInput)
+                addView(descriptionInput)
+            }
+            AlertDialog.Builder(this)
+                .setTitle("YouTube metadata review")
+                .setView(panel)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Continue to Google") { _, _ ->
+                    val metadata = draft.copy(
+                        title = titleInput.text.toString().trim(),
+                        description = descriptionInput.text.toString(),
+                        privacyStatus = "unlisted"
+                    )
+                    val validation = metadata.validate()
+                    if (validation != null) {
+                        Toast.makeText(this, validation, Toast.LENGTH_LONG).show()
+                        return@setPositiveButton
+                    }
+                    pendingYoutubeMetadata = metadata
+                    status.text = "Google account authorization माँग रही हूँ…"
+                    YouTubeAuthorizationManager(this).authorize(
+                        YouTubeAuthorizationManager.REQUEST_CODE,
+                        onToken = { token -> enqueueYoutubeUpload(token) },
+                        onError = { error -> runOnUiThread {
+                            status.text = error
+                            Toast.makeText(this, error, Toast.LENGTH_LONG).show()
+                        } }
+                    )
+                }
+                .show()
+        } catch (error: Exception) {
+            Toast.makeText(this, "Video पढ़ नहीं पाई: ${error.localizedMessage}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun enqueueYoutubeUpload(accessToken: String) {
+        val uri = pendingYoutubeUri
+        val metadata = pendingYoutubeMetadata
+        if (uri == null || metadata == null) {
+            Toast.makeText(this, "Upload details उपलब्ध नहीं हैं। दोबारा video चुनें।", Toast.LENGTH_LONG).show()
+            return
+        }
+        try {
+            val workId = YouTubeUploadCoordinator.enqueue(this, uri, pendingYoutubeMime, metadata, accessToken)
+            status.text = "YouTube upload queue में जोड़ दिया है…"
+            val uploadStatus = WorkManager.getInstance(this).getWorkInfoByIdLiveData(workId)
+            val statusObserver = object : androidx.lifecycle.Observer<WorkInfo?> {
+                override fun onChanged(info: WorkInfo?) {
+                    if (info == null) return
+                    when (info.state) {
+                        WorkInfo.State.SUCCEEDED -> {
+                            val url = info.outputData.getString("watch_url").orEmpty()
+                            status.text = "YouTube upload पूरा हुआ: $url"
+                            Toast.makeText(this@MainActivity, "Upload complete: $url", Toast.LENGTH_LONG).show()
+                            pendingYoutubeUri = null
+                            pendingYoutubeMetadata = null
+                        }
+                        WorkInfo.State.FAILED -> {
+                            val error = info.outputData.getString("error") ?: "Upload असफल हुआ।"
+                            status.text = error
+                            Toast.makeText(this@MainActivity, error, Toast.LENGTH_LONG).show()
+                        }
+                        WorkInfo.State.RUNNING -> status.text = "YouTube पर वीडियो अपलोड हो रहा है…"
+                        else -> Unit
+                    }
+                    if (info.state.isFinished) uploadStatus.removeObserver(this)
+                }
+            }
+            uploadStatus.observeForever(statusObserver)
+        } catch (error: Exception) {
+            Toast.makeText(this, "Upload queue नहीं बन पाई: ${error.localizedMessage}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    @Deprecated("Deprecated by Android; retained for compatibility with current Activity implementation.")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_YOUTUBE_VIDEO && resultCode == RESULT_OK) {
+            data?.data?.let(::reviewYoutubeVideo)
+        } else if (requestCode == YouTubeAuthorizationManager.REQUEST_CODE && resultCode == RESULT_OK) {
+            val token = YouTubeAuthorizationManager(this).tokenFromResult(data)
+            if (!token.isNullOrBlank()) enqueueYoutubeUpload(token)
+            else Toast.makeText(this, "Google authorization से token नहीं मिला।", Toast.LENGTH_LONG).show()
+        } else if (requestCode == YouTubeAuthorizationManager.REQUEST_CODE) {
+            Toast.makeText(this, "Google authorization cancel हुई।", Toast.LENGTH_LONG).show()
+        }
+    }
+
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         recognizer?.destroy()
@@ -601,6 +840,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     companion object {
+        const val ACTION_YOUTUBE_UPLOAD = "com.orbit.agent.ACTION_YOUTUBE_UPLOAD"
+        const val EXTRA_YOUTUBE_DURATION_SECONDS = "youtube_duration_seconds"
+        private const val REQUEST_VIDEO_PERMISSION = 9303
+        private const val REQUEST_YOUTUBE_VIDEO = 9300
         private const val REQUEST_AUDIO = 42
         private const val REQUEST_NOTIFICATIONS = 43
     }
