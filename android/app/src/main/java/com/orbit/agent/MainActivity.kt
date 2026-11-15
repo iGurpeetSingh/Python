@@ -108,6 +108,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             text = "YouTube Upload"
             setOnClickListener { openYoutubeVideoPicker() }
         }
+        val examControlButton = Button(this).apply {
             text = "Coaching & Exam Control"
             setOnClickListener { startActivity(Intent(this@MainActivity, CoachingExamActivity::class.java)) }
         }
@@ -124,6 +125,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         layout.addView(micButton)
         layout.addView(accessibilityButton)
         layout.addView(examControlButton)
+        layout.addView(findByDurationButton)
         layout.addView(youtubeUploadButton)
         layout.addView(help)
         setContentView(layout)
