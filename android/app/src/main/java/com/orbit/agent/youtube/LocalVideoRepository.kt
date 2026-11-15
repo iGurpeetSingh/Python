@@ -9,7 +9,7 @@ import android.provider.OpenableColumns
 
 class LocalVideoRepository(private val context: Context) {
     fun findByDuration(targetSeconds: Long, toleranceSeconds: Long = 2L): List<VideoCandidate> {
-        val collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+        val collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
         val projection = arrayOf(
             MediaStore.Video.Media._ID,
             MediaStore.Video.Media.DISPLAY_NAME,
