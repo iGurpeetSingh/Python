@@ -22,6 +22,7 @@ class DeviceHub:
     def __init__(self) -> None:
         self._devices: dict[str, ConnectedDevice] = {}
         self._pending: dict[str, asyncio.Future] = {}
+        self._agent_status: dict[str, dict[str, Any]] = {}
         self._lock = asyncio.Lock()
 
     def verify_code(self, code: str | None) -> bool:
@@ -31,6 +32,18 @@ class DeviceHub:
     async def device_names(self) -> list[str]:
         async with self._lock:
             return sorted(self._devices.keys())
+
+    async def agent_status(self, device_id: str) -> dict[str, Any]:
+        async with self._lock:
+            return dict(self._agent_status.get(device_id) or {
+                "state": "offline",
+                "total": 0,
+                "completed": 0,
+                "current": 0,
+                "current_prompt": "",
+                "error": "Windows browser agent status is not available.",
+                "results": [],
+            })
 
     async def connect(self, device_id: str, websocket: WebSocket, code: str | None) -> None:
         if device_id not in {"windows", "android"} or not self.verify_code(code):
@@ -65,6 +78,10 @@ class DeviceHub:
                     if future is not None and not future.done():
                         future.set_result(message.get("result") or {})
                 elif kind == "agent_status":
+                    status = message.get("status")
+                    if isinstance(status, dict):
+                        async with self._lock:
+                            self._agent_status[device_id] = status
                     await websocket.send_json({"type": "status_ack"})
         except WebSocketDisconnect:
             pass
