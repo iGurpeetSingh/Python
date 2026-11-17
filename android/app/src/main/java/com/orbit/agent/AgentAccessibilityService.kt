@@ -958,7 +958,9 @@ class AgentAccessibilityService : AccessibilityService() {
 
     private fun pollChatGptImageCompletion() {
         if (!imageBatchRunning || imageBatchPaused) return
-        if (!isPackageForeground(chatGptPackage)) {
+        // Match the same ChatGPT interactive-window lookup used by the
+        // composer path; rootInActiveWindow alone can belong to another window.
+        if (findChatGptRoot() == null) {
             imageBatchStatus?.invoke("ChatGPT खुला रखें। Generation की जाँच रुकी हुई है।")
             handler.postDelayed({ pollChatGptImageCompletion() }, 2500)
             return
