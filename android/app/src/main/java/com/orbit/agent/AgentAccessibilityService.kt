@@ -1019,9 +1019,8 @@ class AgentAccessibilityService : AccessibilityService() {
     }
 
     private fun failChatGptBatch(message: String) {
-        imageBatchRunning = false
+        // Keep the queue and current prompt so the user can inspect ChatGPT and retry.
         imageBatchPaused = true
-        imageBatchWaitingForImage = false
         imageBatchStatus?.invoke(message)
     }
 
