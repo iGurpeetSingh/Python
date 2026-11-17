@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 import os
 import re
+import json
 from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException, WebSocket
@@ -17,6 +18,7 @@ from .browser import open_chatgpt, shutdown_browser
 from .device_hub import device_hub
 from .intents import parse_chatgpt_command
 from .papers import router as papers_router
+from .image_batch import image_batch_manager
 
 
 class Chat(BaseModel):
@@ -29,6 +31,14 @@ class Scroll(BaseModel):
 
 class PairingRequest(BaseModel):
     code: str = Field(min_length=6, max_length=256)
+
+
+class ImageBatchStart(BaseModel):
+    prompts: list[str] = Field(min_length=1, max_length=50)
+
+
+class ImageBatchControl(BaseModel):
+    action: str = Field(pattern=r"^(pause|resume|cancel)$")
 
 
 def require_pairing_code(code: str | None) -> None:
@@ -122,6 +132,59 @@ async def device_socket(websocket: WebSocket, device_id: str):
     authorization = websocket.headers.get("authorization", "")
     code = authorization.removeprefix("Bearer ").strip()
     await device_hub.connect(device_id, websocket, code)
+
+
+@app.post("/api/image-batch/start")
+async def start_image_batch(
+    body: ImageBatchStart,
+    x_guri_pairing_code: str | None = Header(default=None),
+):
+    prompts = [prompt.strip() for prompt in body.prompts if prompt.strip()]
+    if not prompts:
+        raise HTTPException(status_code=422, detail="कम से कम एक prompt दें।")
+    if len(prompts) > 50:
+        raise HTTPException(status_code=422, detail="एक batch में अधिकतम 50 prompts भेज सकते हैं।")
+    if GURI_CLOUD_MODE:
+        require_pairing_code(x_guri_pairing_code)
+        command = "__GURI_IMAGE_BATCH__:" + json.dumps(
+            {"action": "start", "prompts": prompts}, ensure_ascii=False
+        )
+        result = await device_hub.dispatch("windows", command, timeout_seconds=30)
+        return {"ok": True, "message": result.get("reply", "Batch accepted by Windows agent."), "status": result}
+    try:
+        status = await image_batch_manager.start(prompts)
+        return {"ok": True, "status": status}
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/api/image-batch/status")
+async def image_batch_status(
+    x_guri_pairing_code: str | None = Header(default=None),
+):
+    if GURI_CLOUD_MODE:
+        require_pairing_code(x_guri_pairing_code)
+        return {"ok": True, "status": await device_hub.agent_status("windows")}
+    return {"ok": True, "status": image_batch_manager.status()}
+
+
+@app.post("/api/image-batch/control")
+async def control_image_batch(
+    body: ImageBatchControl,
+    x_guri_pairing_code: str | None = Header(default=None),
+):
+    if GURI_CLOUD_MODE:
+        require_pairing_code(x_guri_pairing_code)
+        command = "__GURI_IMAGE_BATCH__:" + json.dumps({"action": body.action})
+        result = await device_hub.dispatch("windows", command, timeout_seconds=30)
+        return {"ok": True, "status": result}
+    if body.action == "pause":
+        status = await image_batch_manager.pause()
+    elif body.action == "resume":
+        status = await image_batch_manager.resume()
+    else:
+        status = await image_batch_manager.cancel()
+    return {"ok": True, "status": status}
 
 
 @app.get("/api/history")
