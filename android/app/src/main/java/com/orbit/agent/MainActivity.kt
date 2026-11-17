@@ -85,6 +85,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
         }
 
+        val imageBatchButton = Button(this).apply {
+            text = "ChatGPT Image Batch"
+            setOnClickListener { startActivity(Intent(this@MainActivity, ImageBatchActivity::class.java)) }
+        }
         val examControlButton = Button(this).apply {
             text = "Coaching & Exam Control"
             setOnClickListener { startActivity(Intent(this@MainActivity, CoachingExamActivity::class.java)) }
@@ -101,6 +105,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         layout.addView(hint)
         layout.addView(micButton)
         layout.addView(accessibilityButton)
+        layout.addView(imageBatchButton)
         layout.addView(examControlButton)
         layout.addView(help)
         setContentView(layout)
