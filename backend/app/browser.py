@@ -8,7 +8,8 @@ from .config import BROWSER_PROFILE_DIR
 
 _playwright = None
 _context = None
-_browser_lock = asyncio.Lock()\n_image_batch_page = None
+_browser_lock = asyncio.Lock()
+_image_batch_page = None
 
 
 async def _get_context():
