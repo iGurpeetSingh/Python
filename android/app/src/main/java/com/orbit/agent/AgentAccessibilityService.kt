@@ -873,15 +873,8 @@ class AgentAccessibilityService : AccessibilityService() {
             imageBatchStatus = null
             return
         }
-        if (!isPackageForeground(chatGptPackage)) {
-            if (retries >= 30) {
-                failChatGptBatch("ChatGPT स्क्रीन active नहीं हुई। ChatGPT खोलकर Resume दबाएँ।")
-                return
-            }
-            imageBatchStatus?.invoke("ChatGPT स्क्रीन का इंतजार…")
-            handler.postDelayed({ sendNextChatGptPrompt(retries + 1) }, 1000)
-            return
-        }
+        // Do not gate on rootInActiveWindow: ChatGPT's composer may live in a
+        // secondary interactive window while another window is reported active.
         val root = findChatGptRoot() ?: run {
             if (retries >= 30) failChatGptBatch("ChatGPT का accessibility window नहीं मिला। Guri Accessibility को OFF/ON करके ChatGPT की नई chat खोलें।")
             else handler.postDelayed({ sendNextChatGptPrompt(retries + 1) }, 1000)
@@ -995,11 +988,7 @@ class AgentAccessibilityService : AccessibilityService() {
     }
 
     private fun countChatGptImageNodes(): Int {
-        val root = rootInActiveWindow ?: return 0
-        if (root.packageName?.toString() != chatGptPackage) {
-            root.recycle()
-            return 0
-        }
+        val root = findChatGptRoot() ?: return 0
         val count = countImageNodes(root, 0)
         root.recycle()
         return count
@@ -1025,11 +1014,7 @@ class AgentAccessibilityService : AccessibilityService() {
     }
 
     private fun hasChatGptGeneratingIndicator(): Boolean {
-        val root = rootInActiveWindow ?: return false
-        if (root.packageName?.toString() != chatGptPackage) {
-            root.recycle()
-            return false
-        }
+        val root = findChatGptRoot() ?: return false
         val found = findChatGptGeneratingNode(root, 0)
         root.recycle()
         return found
@@ -1054,11 +1039,7 @@ class AgentAccessibilityService : AccessibilityService() {
     }
 
     private fun findChatGptActionNode(vararg labels: String): AccessibilityNodeInfo? {
-        val root = rootInActiveWindow ?: return null
-        if (root.packageName?.toString() != chatGptPackage) {
-            root.recycle()
-            return null
-        }
+        val root = findChatGptRoot() ?: return null
         val wanted = labels.map { it.lowercase(Locale.ROOT) }
         val matches = mutableListOf<AccessibilityNodeInfo>()
         collectLabelNodes(root, matches, wanted, 0)
