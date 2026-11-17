@@ -54,6 +54,17 @@ class DeviceHub:
         async with self._lock:
             old = self._devices.get(device_id)
             self._devices[device_id] = ConnectedDevice(websocket, device_id)
+            previous = self._agent_status.get(device_id, {})
+            if previous.get("state") in {None, "offline", "idle"}:
+                self._agent_status[device_id] = {
+                    "state": "idle",
+                    "total": 0,
+                    "completed": 0,
+                    "current": 0,
+                    "current_prompt": "",
+                    "error": None,
+                    "results": [],
+                }
 
         if old is not None and old.websocket is not websocket:
             try:
@@ -92,6 +103,11 @@ class DeviceHub:
                 current = self._devices.get(device_id)
                 if current is not None and current.websocket is websocket:
                     self._devices.pop(device_id, None)
+                    previous = dict(self._agent_status.get(device_id) or {})
+                    if previous.get("state") not in {"completed", "failed", "cancelled", "idle"}:
+                        previous["state"] = "offline"
+                        previous["error"] = "Windows browser agent disconnected."
+                        self._agent_status[device_id] = previous
 
     async def dispatch(
         self,
