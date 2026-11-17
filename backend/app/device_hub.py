@@ -104,7 +104,7 @@ class DeviceHub:
                 if current is not None and current.websocket is websocket:
                     self._devices.pop(device_id, None)
                     previous = dict(self._agent_status.get(device_id) or {})
-                    if previous.get("state") not in {"completed", "failed", "cancelled", "idle"}:
+                    if previous.get("state") not in {"completed", "failed", "cancelled"}:
                         previous["state"] = "offline"
                         previous["error"] = "Windows browser agent disconnected."
                         self._agent_status[device_id] = previous
