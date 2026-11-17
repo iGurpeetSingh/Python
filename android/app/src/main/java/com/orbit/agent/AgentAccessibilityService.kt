@@ -789,7 +789,6 @@ class AgentAccessibilityService : AccessibilityService() {
         // A previous attempt may have paused on a UI-detection failure. Start must
         // recover that state instead of permanently reporting "already running".
         if (imageBatchRunning && imageBatchPaused) {
-            handler.removeCallbacksAndMessages(null)
             imageBatchPrompts.clear()
             imageBatchRunning = false
             imageBatchPaused = false
@@ -905,7 +904,7 @@ class AgentAccessibilityService : AccessibilityService() {
         if (composer == null) {
             // Some ChatGPT builds expose the composer as a labelled Compose node.
             // Tap that exact accessible label, then inspect the editor again.
-            val labelledComposer = findChatGptActionNode("message chatgpt", "ask anything", "message")
+            val labelledComposer = findChatGptActionNode("message chatgpt", "ask anything")
             if (labelledComposer != null) {
                 val opened = clickNode(labelledComposer)
                 labelledComposer.recycle()
