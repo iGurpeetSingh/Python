@@ -20,6 +20,31 @@ Keep the extracted Guri folder on the PC. Do not open the Vercel-hosted page for
 
 The launcher writes diagnostic logs under `%TEMP%\guri-*.log`. If startup fails, it displays the exact missing dependency or port error instead of silently claiming success.
 
+## Bulk ChatGPT Image Automation
+
+The Guri dashboard includes a sequential image-prompt queue for up to 50 prompts per batch.
+
+### Local Windows mode
+
+1. Run `Start-Guri.bat` and open the local Guri dashboard.
+2. Paste numbered prompts into **Bulk Image Automation** (one prompt per numbered item).
+3. Sign in to ChatGPT manually in the Chrome window opened by Playwright.
+4. Press **Start batch**. The worker sends one prompt, waits until a generated image is visible and the response has stopped, then sends the next prompt.
+5. Use **Pause** to stop after the current image, **Resume** to continue, or **Retry failed prompt** to retry the prompt that did not finish.
+
+The automation uses the existing Playwright browser profile under `backend/browser_profile`. It does not use an OpenAI API key or a paid automation API. ChatGPT account limits, login checks, CAPTCHA, and usage verification remain under the user's control. The current implementation verifies image completion in the page; it does not automatically download generated images.
+
+### Remote dashboard mode
+
+The Vercel frontend can call the existing FastAPI cloud service by setting `VITE_API_URL` to the HTTPS URL of the deployed Guri API. Keep the FastAPI/WebSocket broker on a WebSocket-capable host (the existing Render service), because Vercel Functions do not host the long-lived Windows-agent WebSocket connection.
+
+- Configure the Render service with `GURI_CLOUD_MODE=true` and a private `GURI_PAIRING_CODE`.
+- Start the Windows agent with `GURI_CLOUD_URL` and `GURI_DEVICE_TOKEN` set to that Render URL and the same pairing code.
+- Open the Vercel dashboard and enter the pairing code in the image automation panel.
+- The dashboard submits the prompt queue to the Windows agent and polls progress from the cloud API.
+
+Do not expose the pairing code in public source code or commit it to GitHub.
+
 ## Android phone mode (standalone)
 
 The Android companion can listen and run its supported phone commands locally. It does not need a cloud URL, Render URL, pairing code, Windows PC, or USB connection.
