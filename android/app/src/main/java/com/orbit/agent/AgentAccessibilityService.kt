@@ -773,6 +773,7 @@ class AgentAccessibilityService : AccessibilityService() {
     private var imageBatchPollAttempts = 0
     private var imageBatchBaselineImages = 0
     private var imageBatchStablePolls = 0
+    private var imageBatchWaitingForImage = false
     private var imageBatchStatus: ((String) -> Unit)? = null
     private val chatGptPackage = "com.openai.chatgpt"
 
@@ -826,14 +827,18 @@ class AgentAccessibilityService : AccessibilityService() {
         if (imageBatchPaused) {
             imageBatchPaused = false
             imageBatchStatus?.invoke("Batch फिर शुरू हो रही है…")
-            handler.postDelayed({ sendNextChatGptPrompt(0) }, 500)
+            if (imageBatchWaitingForImage) {
+                handler.postDelayed({ pollChatGptImageCompletion() }, 500)
+            } else {
+                handler.postDelayed({ sendNextChatGptPrompt(0) }, 500)
+            }
         }
     }
 
     fun cancelChatGptImageBatch() {
         imageBatchRunning = false
         imageBatchPaused = false
-        handler.removeCallbacksAndMessages(null)
+        imageBatchWaitingForImage = false
         imageBatchStatus?.invoke("Batch cancel कर दी गई। ChatGPT में पहले से भेजी गई generation जारी रह सकती है।")
         imageBatchPrompts.clear()
         imageBatchStatus = null
@@ -902,6 +907,7 @@ class AgentAccessibilityService : AccessibilityService() {
             imageBatchBaselineImages = countChatGptImageNodes()
             imageBatchPollAttempts = 0
             imageBatchStablePolls = 0
+            imageBatchWaitingForImage = true
             imageBatchStatus?.invoke("Prompt " + (imageBatchIndex + 1) + "/" + imageBatchPrompts.size + " भेज दिया। Image बनने का इंतजार…")
             handler.postDelayed({ pollChatGptImageCompletion() }, 2500)
         }, 500)
@@ -922,6 +928,7 @@ class AgentAccessibilityService : AccessibilityService() {
 
         if (imageBatchStablePolls >= 3) {
             imageBatchStatus?.invoke("Prompt " + (imageBatchIndex + 1) + " की Image दिखाई दी।")
+            imageBatchWaitingForImage = false
             imageBatchIndex++
             if (imageBatchPaused) return
             handler.postDelayed({ sendNextChatGptPrompt(0) }, 1800)
@@ -1014,6 +1021,7 @@ class AgentAccessibilityService : AccessibilityService() {
     private fun failChatGptBatch(message: String) {
         imageBatchRunning = false
         imageBatchPaused = true
+        imageBatchWaitingForImage = false
         imageBatchStatus?.invoke(message)
     }
 
