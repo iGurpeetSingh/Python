@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Mic, MicOff, Bot, LoaderCircle, Terminal, Monitor, Smartphone, Wifi } from "lucide-react";
 import "./style.css";
+import ImageBatch from "./ImageBatch.jsx";
 
 const API = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
 const API_URL = (path) => API + path;
@@ -235,6 +236,7 @@ export default function App() {
           </div>
         ))}
       </section>
+      <ImageBatch />
       <p className="guri-footnote">Voice commands आपके अपने PC पर चल रहे local Guri runtime को भेजे जाते हैं। कोई Render URL या pairing link डालने की जरूरत नहीं है।</p>
     </main>
   );
