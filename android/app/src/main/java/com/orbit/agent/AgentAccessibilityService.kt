@@ -782,9 +782,18 @@ class AgentAccessibilityService : AccessibilityService() {
             listener("1 से 50 तक non-empty prompts डालें।")
             return false
         }
-        if (imageBatchRunning) {
-            listener("एक Image Batch पहले से चल रही है।")
+        if (imageBatchRunning && !imageBatchPaused) {
+            listener("एक Image Batch अभी चल रही है। पहले Pause या Cancel करें।")
             return false
+        }
+        // A previous attempt may have paused on a UI-detection failure. Start must
+        // recover that state instead of permanently reporting "already running".
+        if (imageBatchRunning && imageBatchPaused) {
+            handler.removeCallbacksAndMessages(null)
+            imageBatchPrompts.clear()
+            imageBatchRunning = false
+            imageBatchPaused = false
+            imageBatchWaitingForImage = false
         }
         val launch = packageManager.getLaunchIntentForPackage(chatGptPackage)
         if (launch == null) {
@@ -862,26 +871,51 @@ class AgentAccessibilityService : AccessibilityService() {
             return
         }
         val root = rootInActiveWindow ?: run {
-            handler.postDelayed({ sendNextChatGptPrompt(retries + 1) }, 1000)
+            if (retries >= 30) failChatGptBatch("ChatGPT का accessibility window नहीं मिला। Guri Accessibility को OFF/ON करके ChatGPT की नई chat खोलें।")
+            else handler.postDelayed({ sendNextChatGptPrompt(retries + 1) }, 1000)
+            return
+        }
+        val activePackage = root.packageName?.toString().orEmpty()
+        if (activePackage != chatGptPackage) {
+            root.recycle()
+            if (retries >= 30) failChatGptBatch("Active screen ChatGPT नहीं है (package: $activePackage)। ChatGPT को foreground में रखें।")
+            else handler.postDelayed({ sendNextChatGptPrompt(retries + 1) }, 1000)
             return
         }
         val editables = mutableListOf<AccessibilityNodeInfo>()
         collectEditableNodes(root, editables, 0)
         root.recycle()
-        val composer = editables.firstOrNull { node ->
-            val hint = node.hintText?.toString()?.lowercase(Locale.ROOT).orEmpty()
-            val id = node.viewIdResourceName?.lowercase(Locale.ROOT).orEmpty()
-            val desc = node.contentDescription?.toString()?.lowercase(Locale.ROOT).orEmpty()
-            node.isVisibleToUser && node.isEnabled &&
-                (id.contains("prompt") || id.contains("composer") ||
-                 hint.contains("message") || hint.contains("prompt") ||
-                 desc.contains("message") || desc.contains("prompt") ||
-                 node.isEditable)
-        }
+        val composer = editables
+            .filter { it.isVisibleToUser && it.isEnabled }
+            .maxByOrNull { node ->
+                val hint = node.hintText?.toString()?.lowercase(Locale.ROOT).orEmpty()
+                val id = node.viewIdResourceName?.lowercase(Locale.ROOT).orEmpty()
+                val desc = node.contentDescription?.toString()?.lowercase(Locale.ROOT).orEmpty()
+                val cls = node.className?.toString()?.lowercase(Locale.ROOT).orEmpty()
+                val bounds = android.graphics.Rect()
+                node.getBoundsInScreen(bounds)
+                (if (hint.contains("message") || hint.contains("prompt") || hint.contains("ask anything")) 100 else 0) +
+                    (if (desc.contains("message") || desc.contains("prompt") || desc.contains("ask anything")) 80 else 0) +
+                    (if (id.contains("composer") || id.contains("prompt") || id.contains("input")) 60 else 0) +
+                    (if (cls.contains("edittext") || node.isEditable) 20 else 0) +
+                    (if (bounds.height() > 0 && bounds.centerY() > resources.displayMetrics.heightPixels * 0.55f) 10 else 0) +
+                    (if (node.isFocused) 5 else 0)
+            }
         editables.filter { it !== composer }.forEach { it.recycle() }
         if (composer == null) {
+            // Some ChatGPT builds expose the composer as a labelled Compose node.
+            // Tap that exact accessible label, then inspect the editor again.
+            val labelledComposer = findChatGptActionNode("message chatgpt", "ask anything", "message")
+            if (labelledComposer != null) {
+                val opened = clickNode(labelledComposer)
+                labelledComposer.recycle()
+                if (opened && retries < 30) {
+                    handler.postDelayed({ sendNextChatGptPrompt(retries + 1) }, 650)
+                    return
+                }
+            }
             if (retries >= 30) {
-                failChatGptBatch("ChatGPT का message box नहीं मिला। Login करें और नई chat खोलें, फिर Resume करें।")
+                failChatGptBatch("ChatGPT खुला है, लेकिन composer accessibility में नहीं दिख रहा। ChatGPT की नई chat खोलें; फिर Guri Accessibility OFF/ON करके Start करें।")
             } else handler.postDelayed({ sendNextChatGptPrompt(retries + 1) }, 1000)
             return
         }
@@ -897,14 +931,18 @@ class AgentAccessibilityService : AccessibilityService() {
             return
         }
         handler.postDelayed({
-            val send = findChatGptActionNode("send", "send message", "भेजें", "भेजो")
+            // Capture the existing image count BEFORE pressing Send; otherwise a
+            // fast-rendered image can become part of the baseline and never be detected.
+            imageBatchBaselineImages = countChatGptImageNodes()
+            val send = findChatGptActionNode(
+                "send", "send message", "send prompt", "submit", "भेजें", "भेजो"
+            )
             if (send == null || !clickNode(send)) {
                 send?.recycle()
-                failChatGptBatch("Prompt लिखा गया, लेकिन Send button नहीं मिला। ChatGPT स्क्रीन जाँचें।")
+                failChatGptBatch("Prompt composer में लिखा गया, लेकिन ChatGPT का Send control नहीं मिला।")
                 return@postDelayed
             }
             send.recycle()
-            imageBatchBaselineImages = countChatGptImageNodes()
             imageBatchPollAttempts = 0
             imageBatchStablePolls = 0
             imageBatchWaitingForImage = true
