@@ -1,3 +1,9 @@
+## Android ChatGPT Image Batch
+
+- Android app mein 1–50 image prompts paste karke sequentially ChatGPT Android app mein bhejne ka on-device workflow add kiya gaya hai.
+- Setup, permissions, usage, limitations aur APK build instructions: [docs/ANDROID-CHATGPT-IMAGE-BATCH.md](docs/ANDROID-CHATGPT-IMAGE-BATCH.md).
+- APK build ke liye GitHub Actions mein **Build Guri Android APK** workflow run/artifact dekhein.
+
 # Guri Voice Assistant
 
 Guri has two independent local runtimes. **No Render URL, cloud URL, pairing code, or backend link is required for the basic workflows.**

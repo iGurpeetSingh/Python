@@ -764,6 +764,299 @@ class AgentAccessibilityService : AccessibilityService() {
         return performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
     }
 
+
+    // ---- ChatGPT image prompt batch (on-device Accessibility workflow) ----
+    private val imageBatchPrompts = mutableListOf<String>()
+    private var imageBatchIndex = 0
+    private var imageBatchRunning = false
+    private var imageBatchPaused = false
+    private var imageBatchPollAttempts = 0
+    private var imageBatchBaselineImages = 0
+    private var imageBatchStablePolls = 0
+    private var imageBatchWaitingForImage = false
+    private var imageBatchStatus: ((String) -> Unit)? = null
+    private val chatGptPackage = "com.openai.chatgpt"
+
+    // ChatGPT may expose the composer through a secondary interactive window.
+    private fun findChatGptRoot(): AccessibilityNodeInfo? {
+        val active = rootInActiveWindow
+        if (active?.packageName?.toString() == chatGptPackage) return active
+        active?.recycle()
+        for (window in windows) {
+            val candidate = try { window.root } catch (_: Exception) { null } ?: continue
+            if (candidate.packageName?.toString() == chatGptPackage) return candidate
+            candidate.recycle()
+        }
+        return null
+    }
+
+    fun startChatGptImageBatch(prompts: List<String>, listener: (String) -> Unit): Boolean {
+        if (prompts.isEmpty() || prompts.size > 50 || prompts.any { it.isBlank() }) {
+            listener("1 से 50 तक non-empty prompts डालें।")
+            return false
+        }
+        if (imageBatchRunning && !imageBatchPaused) {
+            listener("एक Image Batch अभी चल रही है। पहले Pause या Cancel करें।")
+            return false
+        }
+        // A previous attempt may have paused on a UI-detection failure. Start must
+        // recover that state instead of permanently reporting "already running".
+        if (imageBatchRunning && imageBatchPaused) {
+            imageBatchPrompts.clear()
+            imageBatchRunning = false
+            imageBatchPaused = false
+            imageBatchWaitingForImage = false
+        }
+        val launch = packageManager.getLaunchIntentForPackage(chatGptPackage)
+        if (launch == null) {
+            listener("ChatGPT App इस फोन में install नहीं है। पहले Play Store से ChatGPT install करें।")
+            return false
+        }
+        imageBatchPrompts.clear()
+        imageBatchPrompts.addAll(prompts)
+        imageBatchIndex = 0
+        imageBatchRunning = true
+        imageBatchPaused = false
+        imageBatchStatus = listener
+        listener("ChatGPT खोल रही हूँ… " + prompts.size + " prompts queue में हैं।")
+        if (!isPackageForeground(chatGptPackage)) {
+            try {
+                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(launch)
+            } catch (error: Exception) {
+                imageBatchRunning = false
+                listener("ChatGPT नहीं खुल पाया: " + (error.localizedMessage ?: "unknown error"))
+                return false
+            }
+        }
+        handler.postDelayed({ sendNextChatGptPrompt(0) }, 2200)
+        return true
+    }
+
+    fun pauseChatGptImageBatch() {
+        if (imageBatchRunning) {
+            imageBatchPaused = true
+            imageBatchStatus?.invoke("Batch pause है। मौजूदा generation को बीच में नहीं रोका गया।")
+        }
+    }
+
+    fun resumeChatGptImageBatch() {
+        if (!imageBatchRunning) {
+            imageBatchStatus?.invoke("कोई active batch नहीं है।")
+            return
+        }
+        if (imageBatchPaused) {
+            imageBatchPaused = false
+            imageBatchStatus?.invoke("Batch फिर शुरू हो रही है…")
+            if (imageBatchWaitingForImage) {
+                handler.postDelayed({ pollChatGptImageCompletion() }, 500)
+            } else {
+                handler.postDelayed({ sendNextChatGptPrompt(0) }, 500)
+            }
+        }
+    }
+
+    fun cancelChatGptImageBatch() {
+        imageBatchRunning = false
+        imageBatchPaused = false
+        imageBatchWaitingForImage = false
+        imageBatchStatus?.invoke("Batch cancel कर दी गई। ChatGPT में पहले से भेजी गई generation जारी रह सकती है।")
+        imageBatchPrompts.clear()
+        imageBatchStatus = null
+    }
+
+    private fun sendNextChatGptPrompt(retries: Int) {
+        if (!imageBatchRunning || imageBatchPaused) return
+        if (imageBatchIndex >= imageBatchPrompts.size) {
+            imageBatchRunning = false
+            imageBatchStatus?.invoke("सभी " + imageBatchPrompts.size + " prompts पूरे हो गए।")
+            imageBatchStatus = null
+            return
+        }
+        // Do not gate on rootInActiveWindow: ChatGPT's composer may live in a
+        // secondary interactive window while another window is reported active.
+        val root = findChatGptRoot() ?: run {
+            if (retries >= 30) failChatGptBatch("ChatGPT का accessibility window नहीं मिला। Guri Accessibility को OFF/ON करके ChatGPT की नई chat खोलें।")
+            else handler.postDelayed({ sendNextChatGptPrompt(retries + 1) }, 1000)
+            return
+        }
+        val activePackage = root.packageName?.toString().orEmpty()
+        if (activePackage != chatGptPackage) {
+            root.recycle()
+            if (retries >= 30) failChatGptBatch("Active screen ChatGPT नहीं है (package: $activePackage)। ChatGPT को foreground में रखें।")
+            else handler.postDelayed({ sendNextChatGptPrompt(retries + 1) }, 1000)
+            return
+        }
+        val editables = mutableListOf<AccessibilityNodeInfo>()
+        collectEditableNodes(root, editables, 0)
+        root.recycle()
+        val composer = editables
+            .filter { it.isVisibleToUser && it.isEnabled }
+            .maxByOrNull { node ->
+                val hint = node.hintText?.toString()?.lowercase(Locale.ROOT).orEmpty()
+                val id = node.viewIdResourceName?.lowercase(Locale.ROOT).orEmpty()
+                val desc = node.contentDescription?.toString()?.lowercase(Locale.ROOT).orEmpty()
+                val cls = node.className?.toString()?.lowercase(Locale.ROOT).orEmpty()
+                val bounds = android.graphics.Rect()
+                node.getBoundsInScreen(bounds)
+                (if (hint.contains("message") || hint.contains("prompt") || hint.contains("ask anything")) 100 else 0) +
+                    (if (desc.contains("message") || desc.contains("prompt") || desc.contains("ask anything")) 80 else 0) +
+                    (if (id.contains("composer") || id.contains("prompt") || id.contains("input")) 60 else 0) +
+                    (if (cls.contains("edittext") || node.isEditable) 20 else 0) +
+                    (if (bounds.height() > 0 && bounds.centerY() > resources.displayMetrics.heightPixels * 0.55f) 10 else 0) +
+                    (if (node.isFocused) 5 else 0)
+            }
+        editables.filter { it !== composer }.forEach { it.recycle() }
+        if (composer == null) {
+            // Some ChatGPT builds expose the composer as a labelled Compose node.
+            // Tap that exact accessible label, then inspect the editor again.
+            val labelledComposer = findChatGptActionNode("message chatgpt", "ask anything", "send a message", "type a message")
+            if (labelledComposer != null) {
+                val opened = clickNode(labelledComposer)
+                labelledComposer.recycle()
+                if (opened && retries < 30) {
+                    handler.postDelayed({ sendNextChatGptPrompt(retries + 1) }, 650)
+                    return
+                }
+            }
+            if (retries >= 30) {
+                failChatGptBatch("ChatGPT खुला है, लेकिन composer accessibility में नहीं दिख रहा। ChatGPT की नई chat खोलें; फिर Guri Accessibility OFF/ON करके Start करें।")
+            } else handler.postDelayed({ sendNextChatGptPrompt(retries + 1) }, 1000)
+            return
+        }
+        val prompt = imageBatchPrompts[imageBatchIndex]
+        val args = android.os.Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, prompt)
+        }
+        val focused = composer.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+        val typed = composer.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        composer.recycle()
+        if (!focused || !typed) {
+            failChatGptBatch("Prompt " + (imageBatchIndex + 1) + " message box में नहीं लिखा जा सका।")
+            return
+        }
+        handler.postDelayed({
+            // Capture the existing image count BEFORE pressing Send; otherwise a
+            // fast-rendered image can become part of the baseline and never be detected.
+            imageBatchBaselineImages = countChatGptImageNodes()
+            val send = findChatGptActionNode(
+                "send", "send message", "send prompt", "submit", "भेजें", "भेजो"
+            )
+            if (send == null || !clickNode(send)) {
+                send?.recycle()
+                failChatGptBatch("Prompt composer में लिखा गया, लेकिन ChatGPT का Send control नहीं मिला।")
+                return@postDelayed
+            }
+            send.recycle()
+            imageBatchPollAttempts = 0
+            imageBatchStablePolls = 0
+            imageBatchWaitingForImage = true
+            imageBatchStatus?.invoke("Prompt " + (imageBatchIndex + 1) + "/" + imageBatchPrompts.size + " भेज दिया। Image बनने का इंतजार…")
+            handler.postDelayed({ pollChatGptImageCompletion() }, 2500)
+        }, 500)
+    }
+
+    private fun pollChatGptImageCompletion() {
+        if (!imageBatchRunning || imageBatchPaused) return
+        // Match the same ChatGPT interactive-window lookup used by the
+        // composer path; rootInActiveWindow alone can belong to another window.
+        if (findChatGptRoot() == null) {
+            imageBatchStatus?.invoke("ChatGPT खुला रखें। Generation की जाँच रुकी हुई है।")
+            handler.postDelayed({ pollChatGptImageCompletion() }, 2500)
+            return
+        }
+        imageBatchPollAttempts++
+        val imageCount = countChatGptImageNodes()
+        val generating = hasChatGptGeneratingIndicator()
+        val imageAppeared = imageCount > imageBatchBaselineImages
+        if (imageAppeared && !generating) imageBatchStablePolls++ else imageBatchStablePolls = 0
+
+        if (imageBatchStablePolls >= 3) {
+            imageBatchStatus?.invoke("Prompt " + (imageBatchIndex + 1) + " की Image दिखाई दी।")
+            imageBatchWaitingForImage = false
+            imageBatchIndex++
+            if (imageBatchPaused) return
+            handler.postDelayed({ sendNextChatGptPrompt(0) }, 1800)
+            return
+        }
+        if (imageBatchPollAttempts >= 240) {
+            failChatGptBatch("Prompt " + (imageBatchIndex + 1) + " की Image की पुष्टि 10 मिनट में नहीं हुई। Queue रोक दी है; स्क्रीन जाँचकर Resume करें।")
+            return
+        }
+        if (imageBatchPollAttempts % 8 == 0) {
+            imageBatchStatus?.invoke("Prompt " + (imageBatchIndex + 1) + ": Image generation चल रही है…")
+        }
+        handler.postDelayed({ pollChatGptImageCompletion() }, 2500)
+    }
+
+    private fun countChatGptImageNodes(): Int {
+        val root = findChatGptRoot() ?: return 0
+        val count = countImageNodes(root, 0)
+        root.recycle()
+        return count
+    }
+
+    private fun countImageNodes(node: AccessibilityNodeInfo, depth: Int): Int {
+        if (depth > 24) return 0
+        val cls = node.className?.toString().orEmpty().lowercase(Locale.ROOT)
+        val desc = node.contentDescription?.toString()?.lowercase(Locale.ROOT).orEmpty()
+        val id = node.viewIdResourceName?.lowercase(Locale.ROOT).orEmpty()
+        val bounds = android.graphics.Rect()
+        node.getBoundsInScreen(bounds)
+        var count = if (node.isVisibleToUser &&
+            (cls.contains("image") || desc.contains("generated image") ||
+             desc.contains("view image") || id.contains("image")) &&
+            bounds.width() >= 160 && bounds.height() >= 160) 1 else 0
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            count += countImageNodes(child, depth + 1)
+            child.recycle()
+        }
+        return count
+    }
+
+    private fun hasChatGptGeneratingIndicator(): Boolean {
+        val root = findChatGptRoot() ?: return false
+        val found = findChatGptGeneratingNode(root, 0)
+        root.recycle()
+        return found
+    }
+
+    private fun findChatGptGeneratingNode(node: AccessibilityNodeInfo, depth: Int): Boolean {
+        if (depth > 24) return false
+        val text = (node.text?.toString().orEmpty() + " " +
+            node.contentDescription?.toString().orEmpty() + " " +
+            node.viewIdResourceName.orEmpty()).lowercase(Locale.ROOT)
+        if (node.isVisibleToUser &&
+            (text.contains("stop generating") || text.contains("stop response") ||
+             text.contains("creating image") || text.contains("generating image") ||
+             text.contains("creating your image") || text.contains("image is being generated"))) return true
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            val found = findChatGptGeneratingNode(child, depth + 1)
+            child.recycle()
+            if (found) return true
+        }
+        return false
+    }
+
+    private fun findChatGptActionNode(vararg labels: String): AccessibilityNodeInfo? {
+        val root = findChatGptRoot() ?: return null
+        val wanted = labels.map { it.lowercase(Locale.ROOT) }
+        val matches = mutableListOf<AccessibilityNodeInfo>()
+        collectLabelNodes(root, matches, wanted, 0)
+        root.recycle()
+        val target = matches.firstOrNull { it.isVisibleToUser && it.isEnabled }
+        matches.filter { it !== target }.forEach { it.recycle() }
+        return target
+    }
+
+    private fun failChatGptBatch(message: String) {
+        // Keep the queue and current prompt so the user can inspect ChatGPT and retry.
+        imageBatchPaused = true
+        imageBatchStatus?.invoke(message)
+    }
+
     private fun handleCloudCommand(requestId: String, rawCommand: String) {
         val command = rawCommand.lowercase(Locale.ROOT)
         val hasInstagram = command.contains("instagram") || command.contains("इंस्टाग्राम")
