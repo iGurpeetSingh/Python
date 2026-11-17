@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
 from backend.app.browser import open_chatgpt, shutdown_browser
 from backend.app.core import open_site
 from backend.app.intents import parse_chatgpt_command
+from backend.app.image_batch import image_batch_manager
 
 
 def websocket_url(base_url: str) -> str:
@@ -69,6 +70,54 @@ async def execute_command(command: str) -> dict:
     }
 
 
+async def publish_batch_status(websocket):
+    terminal = {"completed", "failed", "cancelled", "paused", "idle"}
+    while True:
+        status = image_batch_manager.status()
+        try:
+            await websocket.send(json.dumps({
+                "type": "agent_status",
+                "status": status,
+            }, ensure_ascii=False))
+        except Exception:
+            return
+        if status.get("state") in terminal:
+            return
+        await asyncio.sleep(1)
+
+
+async def handle_image_batch_command(command: str, websocket):
+    prefix = "__GURI_IMAGE_BATCH__:"
+    try:
+        payload = json.loads(command[len(prefix):])
+        action = payload.get("action")
+        if action == "start":
+            status = await image_batch_manager.start(payload.get("prompts") or [])
+            asyncio.create_task(publish_batch_status(websocket))
+            return {
+                "reply": f"Image batch started: {status['total']} prompts queued.",
+                "action": "image_batch_start",
+                "status": "started",
+            }
+        if action == "pause":
+            status = await image_batch_manager.pause()
+            return {"reply": "Image batch pause requested.", "action": "image_batch_pause", "status": status["state"]}
+        if action == "resume":
+            status = await image_batch_manager.resume()
+            asyncio.create_task(publish_batch_status(websocket))
+            return {"reply": "Image batch resumed.", "action": "image_batch_resume", "status": status["state"]}
+        if action == "cancel":
+            status = await image_batch_manager.cancel()
+            return {"reply": "Image batch cancelled.", "action": "image_batch_cancel", "status": status["state"]}
+        return {"reply": "Unknown image batch action.", "action": "image_batch", "status": "failed"}
+    except Exception as exc:
+        return {
+            "reply": f"Image batch command failed: {type(exc).__name__}: {exc}",
+            "action": "image_batch",
+            "status": "failed",
+        }
+
+
 async def heartbeat(websocket):
     while True:
         await asyncio.sleep(20)
@@ -115,7 +164,10 @@ async def run():
                         command = str(packet.get("command") or "")
                         print(f"Command: {command}")
                         try:
-                            result = await execute_command(command)
+                            if command.startswith("__GURI_IMAGE_BATCH__:"):
+                                result = await handle_image_batch_command(command, websocket)
+                            else:
+                                result = await execute_command(command)
                         except Exception as exc:
                             result = {
                                 "reply": f"Windows action failed: {type(exc).__name__}: {exc}",
