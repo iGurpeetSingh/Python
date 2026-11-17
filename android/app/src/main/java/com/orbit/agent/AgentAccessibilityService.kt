@@ -777,6 +777,19 @@ class AgentAccessibilityService : AccessibilityService() {
     private var imageBatchStatus: ((String) -> Unit)? = null
     private val chatGptPackage = "com.openai.chatgpt"
 
+    // ChatGPT may expose the composer through a secondary interactive window.
+    private fun findChatGptRoot(): AccessibilityNodeInfo? {
+        val active = rootInActiveWindow
+        if (active?.packageName?.toString() == chatGptPackage) return active
+        active?.recycle()
+        for (window in windows) {
+            val candidate = try { window.root } catch (_: Exception) { null } ?: continue
+            if (candidate.packageName?.toString() == chatGptPackage) return candidate
+            candidate.recycle()
+        }
+        return null
+    }
+
     fun startChatGptImageBatch(prompts: List<String>, listener: (String) -> Unit): Boolean {
         if (prompts.isEmpty() || prompts.size > 50 || prompts.any { it.isBlank() }) {
             listener("1 से 50 तक non-empty prompts डालें।")
@@ -869,7 +882,7 @@ class AgentAccessibilityService : AccessibilityService() {
             handler.postDelayed({ sendNextChatGptPrompt(retries + 1) }, 1000)
             return
         }
-        val root = rootInActiveWindow ?: run {
+        val root = findChatGptRoot() ?: run {
             if (retries >= 30) failChatGptBatch("ChatGPT का accessibility window नहीं मिला। Guri Accessibility को OFF/ON करके ChatGPT की नई chat खोलें।")
             else handler.postDelayed({ sendNextChatGptPrompt(retries + 1) }, 1000)
             return
@@ -904,7 +917,7 @@ class AgentAccessibilityService : AccessibilityService() {
         if (composer == null) {
             // Some ChatGPT builds expose the composer as a labelled Compose node.
             // Tap that exact accessible label, then inspect the editor again.
-            val labelledComposer = findChatGptActionNode("message chatgpt", "ask anything")
+            val labelledComposer = findChatGptActionNode("message chatgpt", "ask anything", "send a message", "type a message")
             if (labelledComposer != null) {
                 val opened = clickNode(labelledComposer)
                 labelledComposer.recycle()
